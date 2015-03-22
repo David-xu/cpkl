@@ -1,6 +1,10 @@
 #ifndef _CPKL_TYPEDEF_H_
 #define _CPKL_TYPEDEF_H_
 
+#ifndef CPKL_LEADER
+#error Don't direct include this file, just include the "cpkl.h".
+#endif
+
 typedef	unsigned char				u8;
 typedef unsigned short				u16;
 typedef unsigned long				u32;
