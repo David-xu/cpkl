@@ -485,7 +485,7 @@ static void cpkl_tmsrepone(int tmsidx)
 	}
 
 	char fmtstr[128];
-	cpkl_sprintf(fmtstr, "\"%%%ds\" tms[%%2d] : %%10llu(us)\n", CPKL_TMSCOMMLEN);
+	cpkl_sprintf_s(fmtstr, sizeof(fmtstr), "\"%%%ds\" tms[%%2d] : %%10llu(us)\n", CPKL_TMSCOMMLEN);
     cpkl_printf(fmtstr,
 				_cpkl_tmsar[tmsidx].comm,
 				tmsidx,
@@ -495,6 +495,12 @@ static void cpkl_tmsrepone(int tmsidx)
 void cpkl_tms(int tmsidx, int swch)
 {
 	CPKL_ASSERT(tmsidx < CPKL_CONFIG_TMSNUM);
+
+	if (_cpkl_tmsar[tmsidx].hasinit == 0)
+	{
+		cpkl_printf("tms %2d need to reset first.\n");
+		return;
+	}
 
 	if (swch == CPKL_TMS_ON)
 	{
@@ -516,7 +522,7 @@ void cpkl_tms(int tmsidx, int swch)
 	}
 }
 
-void cpkl_tmsreset(int tmsidx, char *comm)
+void cpkl_tmsinit(int tmsidx, char *comm)
 {
 	CPKL_ASSERT(tmsidx < CPKL_CONFIG_TMSNUM);
 
@@ -1432,7 +1438,7 @@ void cpkl_bsttest(void)
 	}
 	
 	/* insert */
-	cpkl_tmsreset(0, "bst test insert");
+	cpkl_tmsinit(0, "bst test insert");
 	cpkl_tms(0, CPKL_TMS_ON);
 	for (i = 0; i < testtimes; i++)
 	{
@@ -1441,7 +1447,7 @@ void cpkl_bsttest(void)
 	cpkl_tms(0, CPKL_TMS_OFF);
 
 	/* lookup */
-	cpkl_tmsreset(1, "bst test lookup");
+	cpkl_tmsinit(1, "bst test lookup");
 	cpkl_tms(1, CPKL_TMS_ON);
 	for (i = 0; i < testtimes; i++)
 	{
@@ -1452,7 +1458,7 @@ void cpkl_bsttest(void)
 	cpkl_tms(1, CPKL_TMS_OFF);
 
 	/* remove */
-	cpkl_tmsreset(2, "bst test remove");
+	cpkl_tmsinit(2, "bst test remove");
 	cpkl_tms(2, CPKL_TMS_ON);
 	for (i = 0; i < testtimes; i++)
 	{
@@ -2083,43 +2089,8 @@ void cpkl_shdrainslb(cpkl_sh_t *sh)
 #define CPKL_SHTEST_NBLK			(CPKL_SHTEST_1M * 2)
 #define CPKL_SHTEST_SBLK			(32)
 #define CPKL_SHTEST_NCYL			(CPKL_SHTEST_1M * 16)
+
 void *shtestbuf[CPKL_SHTEST_NBLK];
-
-#if 0
-void cpkl_shtest(void)
-{
-	cpkl_tmsreset(0, "shtest alloc");
-	cpkl_tmsreset(1, "shtest free");
-
-	u32 i;
-	cpkl_sh_t testsh;
-	cpkl_shinit(&testsh, CPKL_SHTEST_SBLK, CPKL_SHTEST_1M, 0);
-
-	cpkl_ri_seed();
-
-	cpkl_tms(0, CPKL_TMS_ON);
-	for (i = 0; i < CPKL_SHTEST_NBLK; i++)
-	{
-		shtestbuf[i] = cpkl_shalloc(&testsh);
-	}
-	cpkl_tms(0, CPKL_TMS_OFF);
-
-	cpkl_tms(1, CPKL_TMS_ON);
-	for (i = 0; i < CPKL_SHTEST_NBLK; i++)
-	{
-		cpkl_shfree(&testsh, shtestbuf[i]);
-	}
-	cpkl_tms(1, CPKL_TMS_OFF);
-
-	CPKL_ASSERT(testsh.n_ea == 0);
-	CPKL_ASSERT(testsh.n_ef == 0);
-
-	cpkl_shdsty(&testsh);
-
-	cpkl_tmreport(CPKL_TMSREPORTALL);
-	cpkl_mmcheck();
-}
-#else
 void cpkl_shtest(void)
 {
 	u32 i = 0, j = 0, idx;
@@ -2191,8 +2162,6 @@ void cpkl_shtest(void)
 		}
 	}
 }
-
-#endif
 
 #endif
 
@@ -2627,9 +2596,9 @@ void cpkl_hltest(void)
 	cpkl_hlfcp_t fcp = {CPKL_HSTEST_KEYLEN, CPKL_HSTEST_RSTLEN, 512};
 	cpkl_hsteststr_t *cmpbuff;
 
-	cpkl_tmsreset(0, "hashlist test insert");
-	cpkl_tmsreset(1, "hashlist test lookup");
-	cpkl_tmsreset(2, "hashlist test remove");
+	cpkl_tmsinit(0, "hashlist test insert");
+	cpkl_tmsinit(1, "hashlist test lookup");
+	cpkl_tmsinit(2, "hashlist test remove");
 
 	cpkl_ri_seed();
 
