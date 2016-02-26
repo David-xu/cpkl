@@ -485,7 +485,7 @@ static void cpkl_tmsrepone(int tmsidx)
 	}
 
 	char fmtstr[128];
-	cpkl_sprintf_s(fmtstr, sizeof(fmtstr), "\"%%%ds\" tms[%%2d] : %%10llu(us)\n", CPKL_TMSCOMMLEN);
+	cpkl_pdf_sprintf(fmtstr, "\"%%%ds\" tms[%%2d] : %%10llu(us)\n", CPKL_TMSCOMMLEN);
     cpkl_printf(fmtstr,
 				_cpkl_tmsar[tmsidx].comm,
 				tmsidx,
@@ -498,7 +498,7 @@ void cpkl_tms(int tmsidx, int swch)
 
 	if (_cpkl_tmsar[tmsidx].hasinit == 0)
 	{
-		cpkl_printf("tms %2d need to reset first.\n");
+		cpkl_printf("tms %2d need to reset first.\n", tmsidx);
 		return;
 	}
 
@@ -1056,11 +1056,23 @@ void cpkl_bst_remove(cpkl_bstn_t **root, cpkl_bstn_t *rmnode)
 		if (rmpos->rc)
 			rmpos->rc->f = rmpos;
 
+		/* bug fix, it's so hard to catch. 2016-02-26*/
+		/*
 		if (rmnode->f != NULL)
 		{
 			root = (rmnode->f->lc == rmnode) ? &(rmnode->f->lc) : &(rmnode->f->rc);
 		}
 		*root = rmpos;
+		*/
+		if (rmnode->f != NULL)
+		{
+			if (rmnode->f->lc == rmnode)
+				rmnode->f->lc = rmpos;
+			else
+				rmnode->f->rc = rmpos;
+		}
+		else
+			*root = rmpos;
 	}
 	else
 	{

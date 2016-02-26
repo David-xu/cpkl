@@ -83,7 +83,7 @@
 #define cpkl_pdf_malloc			malloc
 #define cpkl_pdf_free			free
 #define cpkl_pdf_printf			printf
-#define cpkl_pdf_sprintf_s		sprintf_s
+#define cpkl_pdf_sprintf		sprintf
 #define cpkl_pdf_sscanf			sscanf
 #define cpkl_pdf_memset			memset
 #define cpkl_pdf_memcpy			memcpy
@@ -197,7 +197,6 @@ typedef u64						sz_t;
 #ifdef CPKL_CONFIG_COSTUM_RPINTF
 #else
 #define	cpkl_printf				cpkl_pdf_printf
-#define cpkl_sprintf_s			cpkl_pdf_sprintf_s
 #endif
 
 #ifdef CPKL_CONFIG_DEBUG
