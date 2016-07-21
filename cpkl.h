@@ -83,7 +83,7 @@
 #define cpkl_pdf_malloc			malloc
 #define cpkl_pdf_free			free
 #define cpkl_pdf_printf			printf
-#define cpkl_pdf_sprintf		sprintf
+#define cpkl_pdf_sprintf		sprintf_s
 #define cpkl_pdf_sscanf			sscanf
 #define cpkl_pdf_memset			memset
 #define cpkl_pdf_memcpy			memcpy
