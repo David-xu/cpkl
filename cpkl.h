@@ -19,7 +19,7 @@
    we use this mechanism to statistic the memory useage. */
 #define CPKL_CONFIG_MEMMONITOR
 
-/* random infrastructure switch */
+/* random infrastructure switch, kernel mode has not support this */
 #define CPKL_CONFIG_RI
 
 /* range resource manager, todo : need to program completely */
@@ -31,7 +31,7 @@
 /* float number support, some times CPU may NOT support the float point number */
 // #define CPKL_CONFIG_FNS
 
-/* timer link impl */
+/* timer link impl, kernel mode has not support, need to complete */
 #define CPKL_CONFIG_TIMERLINK
 
 /* hashlist use the slabheap which store the hash entry, it's more efficent than malloc directly */
@@ -101,6 +101,7 @@
 #define cpkl_pdf_ftell			ftell
 #define cpkl_pdf_fgets			fgets
 #define cpkl_pdf_fread			fread
+#define cpkl_pdf_fprintf		fprintf
 
 #define CPKL_PATHDASH			"\\"
 
@@ -115,6 +116,7 @@
 #include <semaphore.h>
 #include <errno.h>
 #include <sys/time.h>
+#include <pthread.h>
 
 #define cpkl_pdf_malloc			malloc
 #define cpkl_pdf_free			free
@@ -137,14 +139,18 @@
 #define cpkl_pdf_ftell			ftell
 #define cpkl_pdf_fgets			fgets
 #define cpkl_pdf_fread			fread
+#define cpkl_pdf_fprintf		fprintf
 
 #define CPKL_PATHDASH			"/"
 
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 
 #include <linux/kernel.h>
+#include <linux/semaphore.h>
+#include <linux/sched.h>
+#include <linux/kthread.h>
 
-#define cpkl_pdf_malloc			kmalloc
+#define cpkl_pdf_malloc(sz)		kmalloc(sz, GFP_KERNEL)
 #define cpkl_pdf_free			kfree
 #define cpkl_pdf_printf			printk
 #define cpkl_pdf_sprintf		sprintf
@@ -176,7 +182,6 @@ typedef	long long				s64;
 
 
 typedef	unsigned char			u8;
-typedef unsigned char			byte;
 typedef	unsigned short			u16;
 typedef	unsigned int			u32;
 typedef	unsigned long long		u64;
@@ -194,9 +199,13 @@ typedef u64						sz_t;
 #error "ALU operator width not support, check the MARCO 'CPKL_CONFIG_ALUWIDTH' definition."
 #endif
 
+/* some special value which CPKL used */
+#define	CPKL_INVALID_IDX		((u32)(-1))
+
 #ifdef CPKL_CONFIG_COSTUM_RPINTF
 #else
 #define	cpkl_printf				cpkl_pdf_printf
+#define cpkl_sprintf			cpkl_pdf_sprintf
 #endif
 
 #ifdef CPKL_CONFIG_DEBUG
@@ -292,7 +301,8 @@ static inline void cpkl_listadd_tail(cpkl_listhead_t *p, cpkl_listhead_t *head)
 
 static inline void cpkl_listdel(cpkl_listhead_t *p)
 {
-	cpkl_listdel_(p->prev, p->next);
+	if (!CPKL_LISTISEMPLY(p))
+		cpkl_listdel_(p->prev, p->next);
 }
 
 static inline void cpkl_listndmv(cpkl_listhead_t *from, cpkl_listhead_t *to)
@@ -363,17 +373,32 @@ static inline void cpkl_initslisthead(cpkl_slisthead_t *head)
 	head->next = NULL;
 }
 
-/* add the element @p to head */
-static inline void cpkl_slistadd(cpkl_slisthead_t *p, cpkl_slisthead_t *head)
+/* add the element @p between pos and pos->next */
+static inline void cpkl_slistadd(cpkl_slisthead_t *p, cpkl_slisthead_t *pos)
 {
-	p->next = head->next;
-	head->next = p;
+	p->next = pos->next;
+	pos->next = p;
+}
+
+static inline void cpkl_slistreverse(cpkl_slisthead_t **head)
+{
+	cpkl_slisthead_t *p, *prev, *next;
+
+	p = *head;
+	prev = NULL;
+	while (p)
+	{
+		next = p->next;
+		p->next = prev;
+		prev = p;
+		p = next;
+	}
+	*head = prev;
 }
 
 CODE_SECTION("====================")
 CODE_SECTION("Some Public infrastruct")
 CODE_SECTION("====================")
-#define CPKL_INVALID_IDX			((u32)-1)
 
 #ifndef CPKL_CONFIG_BE
 #define CPKL_HTONS(w)			((((w) & 0x00FF) << 8) | (((w) & 0xFF00) >> 8))
@@ -384,7 +409,7 @@ CODE_SECTION("====================")
 #endif
 static inline u32 cpkl_alg_getbw32(u32 src)
 {
-	u32 len = 1;
+	u32 len = 0;
 
 	if (src & 0xFFFF0000)
 	{
@@ -408,8 +433,11 @@ static inline u32 cpkl_alg_getbw32(u32 src)
 	}
 	if (src & 0x2)
 	{
+		src >>= 1;
 		len += 1;
 	}
+	if (src & 0x1)
+		len += 1;
 	
 	return len;
 }
@@ -419,14 +447,18 @@ u32 cpkl_alg_crc32c(const void* pv, u32 size);
 u64 cpkl_alg_crc64(const void *pv, u32 size);
 u64 cpkl_alg_crc64ck(const void *pv, u32 size);
 u16 cpkl_alg_foldxor(const void *key, u32 size);
-u32 cpkl_alg_bsch(u32 dst, u32 *array, u32 size);
-u32 cpkl_alg_bschl(u64 dst, u64 *array, u32 size);
-int cpkl_stdiv(char *buf, int buflen, int n_argv, char *argv[], u32 len[], int n_divflag, char *divflag);
+void *cpkl_alg_bsch(void *base, unsigned num, unsigned width, void *dst, int (*comp)(const void *, const void *));
+#define CPKL_STDIVCTRL_EMPTYSUBSTR			0x1
+int cpkl_stdiv(char *buf, int buflen, int n_argv, char *argv[], u32 len[], int n_divflag, char *divflag, u32 ctrl);
+void cpkl_bswap(void *p, u32 size);
 void cpkl_hexdump(void *buf, u32 len);
 
 CODE_SECTION("====================")
 CODE_SECTION("Time statistic")
 CODE_SECTION("====================")
+
+#define CPKL_TMSREPORTALL				((int)-1)
+
 #ifdef CPKL_CONFIG_TMS
 
 enum {
@@ -436,7 +468,7 @@ enum {
 
 void cpkl_tms(int tmsidx, int swch);
 /* we can add some commment with the time statistic */
-void cpkl_tmsinit(int tmsidx, char *comm)
+void cpkl_tmsreset(int tmsidx, char *comm)
 ;
 /*  */
 void cpkl_tmreport(int tmsidx);
@@ -446,7 +478,7 @@ void cpkl_tmreport(int tmsidx);
  * set it with CPKL_TMS_OFF to turn off
  */
 static inline void cpkl_tms(int tmsidx, int swch){}
-static inline void cpkl_tmsinit(int tmsidx, char *comm)
+static inline void cpkl_tmsreset(int tmsidx, char *comm)
 {}
 void cpkl_tmreport(int tmsidx){}
 #endif
@@ -476,6 +508,7 @@ static inline void cpkl_ri_test(void){}
 CODE_SECTION("====================")
 CODE_SECTION("Custom Signal")
 CODE_SECTION("====================")
+
 typedef struct _cpkl_custsig {
 	u32			maxsig;
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
@@ -650,6 +683,7 @@ typedef struct _cpkl_shs {
 	void				*rgl, *rgr;				/* the slab memspace range, [rgl, rgr) */
 	cpkl_nfblock_t		*freepos;				/* next free block possition in this slab */
 	u32					n_fblk;					/* number of current free block in this slab */
+	u32					shs_idx;				/*  */
 	/* the block space */
 } cpkl_shs_t;
 
@@ -673,9 +707,10 @@ typedef struct _cpkl_sh {
 	cpkl_custsig_t		sig;					/* when used in multi thread env, we need it */
 	u32					needsig;
 
-#ifdef CPKL_CONFIG_DEBUG
 	/* number of 'all free' 'half free' and 'no free' slabs */
 	u32					n_afs, n_hfs, n_nfs;
+
+#ifdef CPKL_CONFIG_DEBUG
 	u32					n_ea;					/* times of error alloc */
 	u32					n_ef;					/* times of error free */
 	u32					n_sd;					/* times of success drain */
@@ -696,6 +731,9 @@ void cpkl_shfree(cpkl_sh_t *sh, void *blk);
 void cpkl_shreset(cpkl_sh_t *sh);
 /* this is used to drain such all free slab's */
 void cpkl_shdrainslb(cpkl_sh_t *sh);
+u32 cpkl_shgetblkidx(cpkl_sh_t *sh, void *blk);
+void *cpkl_shgetblkbyidx(cpkl_sh_t *sh, u32 idx);
+u32 cpkl_shgetnumidx(cpkl_sh_t *sh);
 #ifdef CPKL_CONFIG_DEBUG
 void cpkl_shtest(void);
 #else
@@ -1024,7 +1062,7 @@ typedef struct _cpkl_threadpool {
 #endif
 } cpkl_threadpool_t;
 
-int cpkl_tpinit(unsigned n_thread);
+int cpkl_tpinit(u32 n_thread);
 void cpkl_tpstat(void);
 #else
 #define cpkl_tpinit(n)			(void)0

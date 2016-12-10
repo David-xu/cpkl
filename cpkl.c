@@ -19,6 +19,10 @@ static u32 cpkl_alg_getbw(const void *pv, u32 len)
 	return 0;
 }
 
+/*
+ * shift one bit
+ * return FSB
+ */
 static u8 cpkl_alg_bs(u8 *buf, u32 len)
 {
 	u8 ret = (buf[0] & 0x80) ? 0x1 : 0x0;
@@ -54,10 +58,15 @@ static inline void cpkl_alg_bsc(u8 *dst, u32 dstlen, u8 *src, u32 srclen, u32 sl
 }
 
 /*
- *
- * len: length of dvsr
+ * Galois Field Division
+ *  'pv' / 'dvsr'
+ *      pv :
+ *   pvlen : length of pv (number of byte)
+ *    dvsr :
+ * dvsrlen : length of dvsr (number of byte)
+ *     rmd : result string
  */
-static u64 cpkl_alg_getrmd(const void *pv, u32 pvlen, const void *dvsr, u32 dvsrlen, u8 *rmd)
+static void cpkl_alg_getrmd(const void *pv, u32 pvlen, const void *dvsr, u32 dvsrlen, u8 *rmd)
 {
 #define	CPKL_CONFIG_MAXDVLEN			(16)
 	static u8 dvbuf[CPKL_CONFIG_MAXDVLEN];
@@ -96,8 +105,6 @@ static u64 cpkl_alg_getrmd(const void *pv, u32 pvlen, const void *dvsr, u32 dvsr
 	{
 		rmd[i] = dvbuf[CPKL_CONFIG_MAXDVLEN - tmp + i];
 	}
-
-	return 0;
 }
 
 /*
@@ -120,7 +127,7 @@ u32 cpkl_alg_crc32(const void *pv, u32 size)
 		0xD6D930AC, 0xCB6E20C8, 0xEDB71064, 0xF0000000
 	};
 	u32 n, crc = 0;
-	const byte *data = (const byte *)pv;
+	const u8 *data = (const u8 *)pv;
 
 	for (n = 0; n < size; n++)
 	{
@@ -288,17 +295,23 @@ u16 cpkl_alg_foldxor(const void *key, u32 size)
 
 
 /* binary search */
-u32 cpkl_alg_bsch(u32 dst, u32 *array, u32 size)
+
+void *cpkl_alg_bsch(void *base, unsigned num, unsigned width, void *dst, int (*comp)(const void *, const void *))
 {
-	u32 idx_l = 0, idx_r = size;
+	u32 idx_l = 0, idx_r = num;
+
+	if (num == 0)
+		return NULL;
+
 	while ((idx_l + 1) != idx_r)
 	{
 		u32 idx_m = (idx_l + idx_r) / 2;
-		if (dst == array[idx_m])
+
+		if (comp(dst, (void *)((sz_t)base + idx_m * width)) == 0)
 		{
-			return idx_m;
+			return (void *)((sz_t)base + idx_m * width);
 		}
-		else if (dst < array[idx_m])
+		else if (comp(dst, (void *)((sz_t)base + idx_m * width)) < 0)
 		{
 			idx_r = idx_m;
 		}
@@ -308,39 +321,13 @@ u32 cpkl_alg_bsch(u32 dst, u32 *array, u32 size)
 		}
 	}
 
-    if (dst == array[idx_l])
+    if (comp(dst, (void *)((sz_t)base + idx_l * width)) == 0)
     {
-        return idx_l;
+        return (void *)((sz_t)base + idx_l * width);
     }
 
-	return CPKL_INVALID_IDX;
-}
-u32 cpkl_alg_bschl(u64 dst, u64 *array, u32 size)
-{
-	u32 idx_l = 0, idx_r = size;
-	while ((idx_l + 1) != idx_r)
-	{
-		u32 idx_m = (idx_l + idx_r) / 2;
-		if (dst == array[idx_m])
-		{
-			return idx_m;
-		}
-		else if (dst < array[idx_m])
-		{
-			idx_r = idx_m;
-		}
-		else
-		{
-			idx_l = idx_m;
-		}
-	}
+	return NULL;
 
-    if (dst == array[idx_l])
-    {
-        return idx_l;
-    }
-
-	return CPKL_INVALID_IDX;
 }
 
 /*
@@ -349,16 +336,17 @@ u32 cpkl_alg_bschl(u64 dst, u64 *array, u32 size)
  */
 int cpkl_stdiv
 (
-	char *buf,
-	int buflen,
-	int n_argv,
-	char *argv[],
-	u32 len[],
-	int n_divflag,
-	char *divflag
+	char *buf,			/* input */
+	int buflen,			/* input */
+	int n_argv,			/* input: sizeof argv */
+	char *argv[],		/* output */
+	u32 len[],			/* output */
+	int n_divflag,		/* input */
+	char *divflag,		/* input */
+	u32 ctrl			/* input */
 )
 {
-	int i, j, flag = 0, ret = 0;
+	int i, j, ret = 0, state = 0;		/* 0: begin, 1: not div char 2: div char */
 
 	for (i = 0; i < n_argv; i++)
 	{
@@ -374,34 +362,73 @@ int cpkl_stdiv
 			{
 				/* ok, we find one div charactor */
 
-				if (flag == 1)
+				switch (state)
 				{
-					flag = 0;
-
-					if (ret == n_argv)
+				case 0:
+				case 1:
+					state = 2;
+					break;
+				case 2:
+					if (ctrl & CPKL_STDIVCTRL_EMPTYSUBSTR)
 					{
-						return ret;
+						/* need to save this empty flag */
+
+						if (ret == n_argv)
+							return ret;
+
+						ret++;
 					}
+					break;
+				default:
+					CPKL_ASSERT(0);
 				}
 
-				goto cpkl_stdiv_nextch;
+				goto cpkl_stdiv_nextch;				
 			}
 		}
 
 		/* reach here, the buf[i] is NOT the div charactor */
-		if (flag == 0)
+		switch (state)
 		{
-			flag = 1;
+		case 0:
+		case 2:
+			if (ret == n_argv)
+				return ret;
+			
 			argv[ret] = &(buf[i]);
+			len[ret] = 1;
 			ret++;
+
+			state = 1;
+
+			break;
+		case 1:
+			(len[ret - 1])++;
+			break;
+		default:
+			CPKL_ASSERT(0);
 		}
 
-		(len[ret - 1])++;
-
 cpkl_stdiv_nextch:
+		
         i++;
 	}
+
     return ret;
+}
+
+/* byte swap,
+ * [0][1][2][3][4]  --->  [4][3][2][1][0]
+ */
+void cpkl_bswap(void *p, u32 size)
+{
+	u8 *buff = (u8 *)p, i, tmp;
+	for (i = 0; i < (size >> 1); i++)
+	{
+		tmp = buff[i];
+		buff[i] = buff[size - i - 1];
+		buff[size - i - 1] = tmp;
+	}
 }
 
 void cpkl_hexdump(void *buf, u32 len)
@@ -461,8 +488,6 @@ static u64 cpkl_tmsstamp(void)
 
 #define CPKL_TMSCOMMLEN					(32)
 
-#define CPKL_TMSREPORTALL				((int)-1)
-
 typedef struct _cpkl_tmstat {
 	char		comm[CPKL_TMSCOMMLEN];
 	u64	start, sum;
@@ -473,6 +498,8 @@ static cpkl_tmstat_t _cpkl_tmsar[CPKL_CONFIG_TMSNUM];
 
 static void cpkl_tmsrepone(int tmsidx)
 {
+	char fmtstr[128];
+
 	CPKL_ASSERT(tmsidx < CPKL_CONFIG_TMSNUM);
 
 	if (_cpkl_tmsar[tmsidx].hasinit == 0)
@@ -484,7 +511,6 @@ static void cpkl_tmsrepone(int tmsidx)
 		cpkl_printf("tms %2d just take off.\n", tmsidx);
 	}
 
-	char fmtstr[128];
 	cpkl_pdf_sprintf(fmtstr, "\"%%%ds\" tms[%%2d] : %%10llu(us)\n", CPKL_TMSCOMMLEN);
     cpkl_printf(fmtstr,
 				_cpkl_tmsar[tmsidx].comm,
@@ -522,7 +548,7 @@ void cpkl_tms(int tmsidx, int swch)
 	}
 }
 
-void cpkl_tmsinit(int tmsidx, char *comm)
+void cpkl_tmsreset(int tmsidx, char *comm)
 {
 	CPKL_ASSERT(tmsidx < CPKL_CONFIG_TMSNUM);
 
@@ -1056,7 +1082,7 @@ void cpkl_bst_remove(cpkl_bstn_t **root, cpkl_bstn_t *rmnode)
 		if (rmpos->rc)
 			rmpos->rc->f = rmpos;
 
-		/* bug fix, it's so hard to catch. 2016-02-26*/
+		/* fix bug, fatal error, hard to catch. 2016-02-26 */
 		/*
 		if (rmnode->f != NULL)
 		{
@@ -1064,12 +1090,12 @@ void cpkl_bst_remove(cpkl_bstn_t **root, cpkl_bstn_t *rmnode)
 		}
 		*root = rmpos;
 		*/
-		if (rmnode->f != NULL)
+		if (rmpos->f != NULL)
 		{
-			if (rmnode->f->lc == rmnode)
-				rmnode->f->lc = rmpos;
+			if (rmpos->f->lc == rmnode)
+				rmpos->f->lc = rmpos;
 			else
-				rmnode->f->rc = rmpos;
+				rmpos->f->rc = rmpos;
 		}
 		else
 			*root = rmpos;
@@ -1450,7 +1476,7 @@ void cpkl_bsttest(void)
 	}
 	
 	/* insert */
-	cpkl_tmsinit(0, "bst test insert");
+	cpkl_tmsreset(0, "bst test insert");
 	cpkl_tms(0, CPKL_TMS_ON);
 	for (i = 0; i < testtimes; i++)
 	{
@@ -1459,7 +1485,7 @@ void cpkl_bsttest(void)
 	cpkl_tms(0, CPKL_TMS_OFF);
 
 	/* lookup */
-	cpkl_tmsinit(1, "bst test lookup");
+	cpkl_tmsreset(1, "bst test lookup");
 	cpkl_tms(1, CPKL_TMS_ON);
 	for (i = 0; i < testtimes; i++)
 	{
@@ -1470,7 +1496,7 @@ void cpkl_bsttest(void)
 	cpkl_tms(1, CPKL_TMS_OFF);
 
 	/* remove */
-	cpkl_tmsinit(2, "bst test remove");
+	cpkl_tmsreset(2, "bst test remove");
 	cpkl_tms(2, CPKL_TMS_ON);
 	for (i = 0; i < testtimes; i++)
 	{
@@ -1501,7 +1527,7 @@ CODE_SECTION("====================")
 
 typedef struct _cpkl_mmblkinf {
 	cpkl_bstn_t	bstn;
-	const char	*filename, *funcname;;
+	const char	*filename, *funcname;
 	u32	line;
 	u32	s_real, s_occupy;
 } cpkl_mmblkinf_t;
@@ -1702,10 +1728,54 @@ CODE_SECTION("====================")
 CODE_SECTION("Slab Heap")
 CODE_SECTION("====================")
 
+static u32 cpkl_shgetfreeidx(cpkl_sh_t *sh)
+{
+	u32 i, n_shs = sh->n_afs + sh->n_hfs + sh->n_nfs;
+	cpkl_shs_t *p;
+	u8 *map;
+
+	if (n_shs == 0)
+		return 0;
+
+	/*  */
+	while ((map = (u8 *)cpkl_malloc(n_shs)) == NULL);
+
+	CPKL_LISTENTRYWALK(p, cpkl_shs_t, &(sh->afh), curslb)
+	{
+		CPKL_ASSERT(map[p->shs_idx] == 0);
+		map[p->shs_idx] = 1;
+	}
+
+	CPKL_LISTENTRYWALK(p, cpkl_shs_t, &(sh->hfh), curslb)
+	{
+		CPKL_ASSERT(map[p->shs_idx] == 0);
+		map[p->shs_idx] = 1;
+	}
+
+	CPKL_LISTENTRYWALK(p, cpkl_shs_t, &(sh->nfh), curslb)
+	{
+		CPKL_ASSERT(map[p->shs_idx] == 0);
+		map[p->shs_idx] = 1;
+	}	
+
+	for (i = 0; i < n_shs; i++)
+	{
+		if (map[i] == 0)
+			break;
+	}
+
+	cpkl_free(map);
+
+	return i;
+}
+
 /* slab stack new slab */
 static void cpkl_shinitslab(cpkl_sh_t *sh, cpkl_shs_t *shs)
 {
 	cpkl_nfblock_t *fp;
+
+	/* sequency the shs, use the shs->slab_idx */
+	shs->shs_idx = cpkl_shgetfreeidx(sh);
 
 	/* init number of free blocks */
 	shs->n_fblk = sh->bps;
@@ -1798,12 +1868,13 @@ CPKL_FCTNEW_DEFINE(cpkl_sh_t)
 		}
 	}
 
+	newsh->n_afs = newsh->n_hfs = newsh->n_nfs = 0;
+
 #ifdef CPKL_CONFIG_DEBUG
-		newsh->n_afs = newsh->n_hfs = newsh->n_nfs = 0;
-		newsh->n_ea = 0;
-		newsh->n_ef = 0;
-		newsh->n_sd = 0;
-		newsh->n_cb = 0;
+	newsh->n_ea = 0;
+	newsh->n_ef = 0;
+	newsh->n_sd = 0;
+	newsh->n_cb = 0;
 #endif
 
 	return newsh;
@@ -1879,9 +1950,7 @@ void *cpkl_shalloc(cpkl_sh_t *sh)
 
 			/* let's insert this new slab into all free list */
 			cpkl_listadd(&(shs->curslb), &(sh->afh));
-#ifdef CPKL_CONFIG_DEBUG
 			(sh->n_afs)++;
-#endif
 		}
 	}
 
@@ -1900,10 +1969,8 @@ void *cpkl_shalloc(cpkl_sh_t *sh)
 	{
 		cpkl_listdel(&(shs->curslb));
 		cpkl_listadd(&(shs->curslb), &(sh->hfh));
-#ifdef CPKL_CONFIG_DEBUG
 		(sh->n_afs)--;
 		(sh->n_hfs)++;
-#endif
 		/* now the  */
 		CPKL_ASSERT(0 == cpkl_bst_insert(&(sh->slbtroot), &(shs->spbst), cpkl_shslbcmp));
 	}
@@ -1919,10 +1986,8 @@ void *cpkl_shalloc(cpkl_sh_t *sh)
 	{
 		cpkl_listdel(&(shs->curslb));
 		cpkl_listadd(&(shs->curslb), &(sh->nfh));
-#ifdef CPKL_CONFIG_DEBUG
 		(sh->n_hfs)--;
 		(sh->n_nfs)++;
-#endif
 	}
 
 #ifdef CPKL_CONFIG_DEBUG
@@ -1975,10 +2040,8 @@ void cpkl_shfree(cpkl_sh_t *sh, void *blk)
 	{
 		cpkl_listdel(&(dstshs->curslb));
 		cpkl_listadd(&(dstshs->curslb), &(sh->hfh));
-#ifdef CPKL_CONFIG_DEBUG
 		(sh->n_nfs)--;
 		(sh->n_hfs)++;
-#endif
 	}
 	
 	(dstshs->n_fblk)++;
@@ -1992,10 +2055,8 @@ void cpkl_shfree(cpkl_sh_t *sh, void *blk)
 	{
 		cpkl_listdel(&(dstshs->curslb));
 		cpkl_listadd(&(dstshs->curslb), &(sh->afh));
-#ifdef CPKL_CONFIG_DEBUG
 		(sh->n_hfs)--;
 		(sh->n_afs)++;
-#endif
 		/*
 		 * the valid block range CAN'T include the blocks which are in the all free list
 		 * so we need to remove the all free slabs from valid range AVL
@@ -2058,10 +2119,11 @@ void cpkl_shreset(cpkl_sh_t *sh)
 	}
 	CPKL_ASSERT(CPKL_LISTISEMPLY(&(sh->nfh)));
 
-#ifdef CPKL_CONFIG_DEBUG
 	sh->n_afs += sh->n_hfs + sh->n_nfs;
 	sh->n_hfs = 0;
 	sh->n_nfs = 0;
+
+#ifdef CPKL_CONFIG_DEBUG
 	sh->n_cb = 0;
 #endif
 }
@@ -2084,9 +2146,10 @@ void cpkl_shdrainslb(cpkl_sh_t *sh)
 	}
 	cpkl_initlisthead(&(sh->afh));
 
+	sh->n_afs = 0;
+
 #ifdef CPKL_CONFIG_DEBUG
-		sh->n_afs = 0;
-		(sh->n_sd)++;
+	(sh->n_sd)++;
 #endif
 
 	if (sh->needsig)
@@ -2095,14 +2158,122 @@ void cpkl_shdrainslb(cpkl_sh_t *sh)
 	}
 }
 
+u32 cpkl_shgetblkidx(cpkl_sh_t *sh, void *blk)
+{
+	u32 retidx = CPKL_INVALID_IDX;
+	/* this is the fake shs, just used to AVL lookup */
+	cpkl_shs_t lkupshs, *dstshs;
+	lkupshs.rgl = blk;
+	lkupshs.rgr = (void *)((sz_t)blk + sh->s_blk);
+	/* locate the shs, find the blk's corrodinate slab by AVL, just save the result in dstshs */
+	dstshs = (cpkl_shs_t *)cpkl_bst_lkup(sh->slbtroot, &(lkupshs.spbst), cpkl_shslbcmp);
+	/* we can't find in AVL, the block is not alloced from this sh */
+	if (NULL == dstshs)
+	{
+		return retidx;
+	}
+	dstshs = CPKL_GETCONTAINER(dstshs, cpkl_shs_t, spbst);
+	retidx = dstshs->shs_idx * sh->bps;
+
+	retidx += ((sz_t)blk - (sz_t)(dstshs->rgl) - sizeof(cpkl_shs_t)) / sh->s_blk;
+
+	return retidx;
+}
+
+void *cpkl_shgetblkbyidx(cpkl_sh_t *sh, u32 idx)
+{
+	cpkl_shs_t *p;
+	u32 shs_idx = idx / sh->bps;
+	cpkl_nfblock_t *fp;
+	void *ret;
+
+	CPKL_LISTENTRYWALK(p, cpkl_shs_t, &(sh->afh), curslb)
+	{
+		if (shs_idx == p->shs_idx)
+			goto cpkl_shgetblkbyidx_getblk;
+	}
+
+	CPKL_LISTENTRYWALK(p, cpkl_shs_t, &(sh->hfh), curslb)
+	{
+		if (shs_idx == p->shs_idx)
+			goto cpkl_shgetblkbyidx_getblk;
+	}
+
+	CPKL_LISTENTRYWALK(p, cpkl_shs_t, &(sh->nfh), curslb)
+	{
+		if (shs_idx == p->shs_idx)
+			goto cpkl_shgetblkbyidx_getblk;
+	}
+
+	/* invalid idx */
+	return NULL;
+
+cpkl_shgetblkbyidx_getblk:
+
+	/* now locate this block */
+	ret = (void *)(((sz_t)p->rgl) + sizeof(cpkl_shs_t) + (idx % sh->bps) * sh->s_blk);
+#if 1
+	/* this block pointer should NOT in free list */
+	fp = p->freepos;
+	while (fp)
+	{
+		if (ret == fp)
+			return NULL;
+
+		fp = fp->next;
+	}
+#endif
+	return ret;
+}
+
+u32 cpkl_shgetnumidx(cpkl_sh_t *sh)
+{
+	return (sh->n_hfs + sh->n_nfs) * sh->bps;
+}
+
 #ifdef CPKL_CONFIG_DEBUG
 
 #define CPKL_SHTEST_1M				(0x400 * 0x400)
 #define CPKL_SHTEST_NBLK			(CPKL_SHTEST_1M * 2)
 #define CPKL_SHTEST_SBLK			(32)
 #define CPKL_SHTEST_NCYL			(CPKL_SHTEST_1M * 16)
-
 void *shtestbuf[CPKL_SHTEST_NBLK];
+
+#if 0
+void cpkl_shtest(void)
+{
+	cpkl_tmsreset(0, "shtest alloc");
+	cpkl_tmsreset(1, "shtest free");
+
+	u32 i;
+	cpkl_sh_t testsh;
+	cpkl_shinit(&testsh, CPKL_SHTEST_SBLK, CPKL_SHTEST_1M, 0);
+
+	cpkl_ri_seed();
+
+	cpkl_tms(0, CPKL_TMS_ON);
+	for (i = 0; i < CPKL_SHTEST_NBLK; i++)
+	{
+		shtestbuf[i] = cpkl_shalloc(&testsh);
+	}
+	cpkl_tms(0, CPKL_TMS_OFF);
+
+	cpkl_tms(1, CPKL_TMS_ON);
+	for (i = 0; i < CPKL_SHTEST_NBLK; i++)
+	{
+		cpkl_shfree(&testsh, shtestbuf[i]);
+	}
+	cpkl_tms(1, CPKL_TMS_OFF);
+
+	CPKL_ASSERT(testsh.n_ea == 0);
+	CPKL_ASSERT(testsh.n_ef == 0);
+
+	cpkl_shdsty(&testsh);
+
+	cpkl_tmreport(CPKL_TMSREPORTALL);
+	cpkl_mmcheck();
+}
+#else
 void cpkl_shtest(void)
 {
 	u32 i = 0, j = 0, idx;
@@ -2174,6 +2345,8 @@ void cpkl_shtest(void)
 		}
 	}
 }
+
+#endif
 
 #endif
 
@@ -2425,7 +2598,7 @@ CPKL_FCTNEW_DEFINE(cpkl_hl_t)
 {
 	cpkl_shfcp_t shfcp	= {sizeof(cpkl_hlnd_t) - 1 + fcp->keylen + fcp->rstlen,
 						   256 * 1024, 0};
-	newhl->hlndsh	= CPKL_FCTNEW(cpkl_sh_t, &shfcp);
+	newhl->hlndsh		= CPKL_FCTNEW(cpkl_sh_t, &shfcp);
 
 	if (newhl->hlndsh == NULL)
 	{
@@ -2506,6 +2679,7 @@ cpkl_hlnd_t* cpkl_hllkup(cpkl_hl_t *hl, const void *key, u32 *bktidx)
 	u32 idx = keyhash % (hl->n_bkt);
 	cpkl_listhead_t *dstlisthead = &(hl->bktlist[idx].hlhead);
 	cpkl_hlnd_t *curnode;
+
 	CPKL_LISTENTRYWALK(curnode, cpkl_hlnd_t, dstlisthead, listnode)
 	{
 		if (cpkl_pdf_memcmp(curnode->keyrst, key, hl->keylen) == 0)
@@ -2525,6 +2699,7 @@ int cpkl_hlinsert(cpkl_hl_t *hl, const void *key, const void *rst)
 	cpkl_listhead_t *dstlisthead;
 	cpkl_hlnd_t *curnode = cpkl_hllkup(hl, key, NULL);
 	int ret;
+
 	if (curnode == NULL)
 	{
 #ifdef CPKL_CONFIG_HL_USESH
@@ -2566,6 +2741,7 @@ void cpkl_hlremove(cpkl_hl_t *hl, const void *key)
 {
 	u32 bktidx = 0;
 	cpkl_hlnd_t *curnode = cpkl_hllkup(hl, key, &bktidx);
+
 	if (curnode)
 	{
 		/* remove from global list */
@@ -2608,9 +2784,9 @@ void cpkl_hltest(void)
 	cpkl_hlfcp_t fcp = {CPKL_HSTEST_KEYLEN, CPKL_HSTEST_RSTLEN, 512};
 	cpkl_hsteststr_t *cmpbuff;
 
-	cpkl_tmsinit(0, "hashlist test insert");
-	cpkl_tmsinit(1, "hashlist test lookup");
-	cpkl_tmsinit(2, "hashlist test remove");
+	cpkl_tmsreset(0, "hashlist test insert");
+	cpkl_tmsreset(1, "hashlist test lookup");
+	cpkl_tmsreset(2, "hashlist test remove");
 
 	cpkl_ri_seed();
 
@@ -2966,7 +3142,7 @@ static cpkl_cpctx_t* cpkl_cpstop_tag(cpkl_cpctx_t *ctx, u8 c, u32 *op)
 			goto cpkl_cpstop_tag_ret;
 		}
 		/* find one matched tag, change the tagcpent */
-		ctx->parent->tagcpent = CPKL_GETCONTAINER(&(ctx->curcpent->subent.next), cpkl_cpent_t, listent);
+		ctx->parent->tagcpent = CPKL_GETCONTAINER(ctx->curcpent->subent.next, cpkl_cpent_t, listent);
 
 		/* we don't find matched tag, just process the 'tag' as normal string */
 		retop |= CPKP_CPCTXOP_CTXFREE | CPKP_CPCTXOP_SHIFTB | CPKP_CPCTXOP_CTXCAT;
@@ -3022,7 +3198,7 @@ static cpkl_cpctx_t* cpkl_cpstop_body(cpkl_cpctx_t *ctx, u8 c, u32 *op)
 		cpkl_cpctxfcp_t ctxfcp = {
 			ctx->bufsize - ctx->n_char, ctx,
 			ctx->cp, ctx->up,
-			cpkl_cps_tag,			/* change state, prepare annotate */
+			cpkl_cps_tag,			/* change state, prepare tag */
 			ctx->curcpent
 		};
 		ret = CPKL_FCTNEW(cpkl_cpctx_t, &ctxfcp);
@@ -3268,7 +3444,7 @@ CPKL_FCTNEW_DEFINE(cpkl_cpctx_t)
 	newctx->curcpent	= fcp->curcpent;
 
 	/* default parameters */
-	newctx->tagcpent	 = CPKL_GETCONTAINER(newctx->curcpent->subent.next, cpkl_cpent_t, listent);
+	newctx->tagcpent	= newctx->curcpent;
 	newctx->n_char		= 0;
 
 	return newctx;
@@ -3674,7 +3850,7 @@ CODE_SECTION("====================")
 #define __COMPARE(context, p1, p2) comp(p1, p2)
 #define __SHORTSORT(lo, hi, width, comp, context) shortsort(lo, hi, width, comp);
 
-static inline void swap (char *a, char *b, unsigned width)
+static inline void buff_swap (char *a, char *b, unsigned width)
 {
     char tmp;
 
@@ -3708,7 +3884,7 @@ static void shortsort (char *lo, char *hi, unsigned width, int (*comp)(const voi
 
         /* A[i] <= A[max] for lo <= i <= hi */
 
-        swap(max, hi, width);
+        buff_swap(max, hi, width);
 
         /* A[i] <= A[hi] for i <= hi, so A[i] <= A[j] for i <= j, j >= hi */
 
@@ -3762,13 +3938,13 @@ recurse:
 
         /* Sort the first, middle, last elements into order */
         if (__COMPARE(context, lo, mid) > 0) {
-            swap(lo, mid, width);
+            buff_swap(lo, mid, width);
         }
         if (__COMPARE(context, lo, hi) > 0) {
-            swap(lo, hi, width);
+            buff_swap(lo, hi, width);
         }
         if (__COMPARE(context, mid, hi) > 0) {
-            swap(mid, hi, width);
+            buff_swap(mid, hi, width);
         }
 
         /* We now wish to partition the array into three pieces, one consisting
@@ -3819,7 +3995,7 @@ recurse:
                A[loguy] > A[mid], A[higuy] <= A[mid],
                loguy <= hi, higuy > lo */
 
-            swap(loguy, higuy, width);
+            buff_swap(loguy, higuy, width);
 
             /* If the partition element was moved, follow it.  Only need
                to check for mid == higuy, since before the swap,
