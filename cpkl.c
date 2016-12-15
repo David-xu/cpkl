@@ -696,7 +696,7 @@ int _cpkl_sigcreate(cpkl_custsig_t *sig, u32 initsig, u32 maxsig, char *filename
 	
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
 	sig->sig = CreateSemaphore(NULL, initsig, maxsig, NULL);
-	if (sig == 0)
+	if (sig->sig == 0)
 		ret = -1;
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 	if (sem_init(&(sig->u_sem), 0, initsig) != 0)
@@ -801,6 +801,137 @@ int _cpkl_sigwait(cpkl_custsig_t *sig, const char *filename, const char *funcnam
 
     return ret;
 }
+
+CODE_SECTION("====================")
+CODE_SECTION("Custom Mutex")
+CODE_SECTION("====================")
+
+int _cpkl_mtxcreate(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
+{
+	int ret = 0;
+
+#if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+	mtx->mtx = CreateMutex(NULL, FALSE, NULL);
+	if (mtx->mtx == NULL)
+	{
+		ret = -1;
+	}
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+	if (pthread_mutex_init(&(mtx->mtx), NULL) != 0)
+	{
+		ret = -1;
+		cpkl_printf("pthread_mutex_init() faild, errno : %d\n"
+					"file: %s, func: %s, line: %d\n",
+					errno,
+					filename, funcname, line);
+	}
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
+#else
+	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
+#endif
+
+	return ret;
+}
+
+void _cpkl_mtxdsty(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
+{
+#if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+	CloseHandle(mtx->mtx);
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+	pthread_mutex_destroy(&(mtx->mtx));
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
+#else
+	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
+#endif
+
+#ifdef CPKL_CONFIG_DEBUG
+	/* tmstat */
+	cpkl_printf("cpkl_mtxdsty(), func: %s, line: %d, "
+				"sum: %lld(us), "
+				"times: %lld\n",
+				funcname, line,
+				mtx->tmsum,
+				mtx->times);
+#endif
+}
+
+int _cpkl_mtxlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
+{
+#ifdef CPKL_CONFIG_DEBUG
+	/* tmstat in sig block */
+	u64 tmbg = cpkl_tmsstamp();
+#endif
+	int ret = 0;
+
+#if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+	WaitForSingleObject(mtx->mtx, INFINITE);
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+	if (pthread_mutex_lock(&(mtx->mtx)) != 0)
+	{
+		ret = -1;
+#ifdef CPKL_CONFIG_DEBUG
+		cpkl_printf("mutex lock operate failed. error:%d\n"
+					"file: %s, func: %s, line: %d\n",
+					errno,
+					filename, funcname, line);
+#endif
+	}
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
+#else
+	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
+#endif
+
+
+#ifdef CPKL_CONFIG_DEBUG
+	mtx->tmsum += (cpkl_tmsstamp() - tmbg);
+	(mtx->times)++;
+#endif
+
+	return ret;
+}
+
+int _cpkl_mtxtrylock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
+{
+	int ret = 0;
+
+#if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+	ret = WaitForSingleObject(mtx->mtx, 0);
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+	ret = pthread_mutex_trylock(&(mtx->mtx));
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
+#else
+	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
+#endif
+
+
+#ifdef CPKL_CONFIG_DEBUG
+	(mtx->times)++;
+#endif
+
+	return ret;
+}
+
+void _cpkl_mtxunlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
+{
+#if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+	ReleaseMutex(mtx->mtx);
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+	if (pthread_mutex_unlock(&(mtx->mtx)) != 0)
+	{
+#ifdef CPKL_CONFIG_DEBUG
+		cpkl_printf("mutex unlock operate failed. error:%d\n"
+					"file: %s, func: %s, line: %d\n",
+					errno,
+					filename, funcname, line);
+#endif
+	}
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
+
+#else
+	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
+#endif
+}
+
 
 CODE_SECTION("====================")
 CODE_SECTION("BST Implementation")
@@ -1309,7 +1440,7 @@ static int cpkl_avlbc(cpkl_avln_t *root)
 			return -1;
 		}
 
-		lh = root->lc->subth;
+		lh = (int)(root->lc->subth);
 	}
 	else
 	{
@@ -1323,7 +1454,7 @@ static int cpkl_avlbc(cpkl_avln_t *root)
 			return -1;
 		}
 
-		rh = root->rc->subth;
+		rh = (int)(root->rc->subth);
 	}
 	else
 	{
@@ -1353,7 +1484,8 @@ static int cpkl_avldrc(cpkl_avln_t *root, cpkl_bstncmp cmpf)
 			goto cpkl_avldrc_faild;
 		}
 	
-		if (!(cmpf(root->lc, root) < 0))
+		if (!((cmpf(root->lc, root) == CPKL_BSTCMP_1LT2) ||
+			  (cmpf(root->lc, root) == CPKL_BSTCMP_1EQ2)))
 		{
 			cpkl_printf("(!(cmpf(root->lc, root) < 0))\n");
 			goto cpkl_avldrc_faild;
@@ -1373,7 +1505,8 @@ static int cpkl_avldrc(cpkl_avln_t *root, cpkl_bstncmp cmpf)
 			goto cpkl_avldrc_faild;
 		}
 	
-		if (!(cmpf(root->rc, root) > 0))
+		if (!((cmpf(root->rc, root) == CPKL_BSTCMP_1BT2) ||
+			  (cmpf(root->rc, root) == CPKL_BSTCMP_1EQ2)))
 		{
 			cpkl_printf("(!(cmpf(root->rc, root) > 0))");
 			goto cpkl_avldrc_faild;
@@ -1847,7 +1980,7 @@ CPKL_FCTNEW_DEFINE(cpkl_sh_t)
 	/* input parameters */
 	newsh->s_blk 	= (fcp->s_blk + sizeof(cpkl_nfblock_t) - 1) & (~(sizeof(cpkl_nfblock_t) - 1));
 	newsh->s_slb 	= fcp->s_slb;
-	newsh->needsig	= fcp->needsig;
+	newsh->needlock	= fcp->needlock;
 
 	/* default parameters */
 	cpkl_initlisthead(&(newsh->afh));
@@ -1859,9 +1992,9 @@ CPKL_FCTNEW_DEFINE(cpkl_sh_t)
 
 	newsh->slbtroot = NULL;
 
-	if (newsh->needsig)
+	if (newsh->needlock)
 	{
-		if (cpkl_sigcreate(&(newsh->sig), 1, 1) != 0)
+		if (cpkl_mtxcreate(&(newsh->mtx)) != 0)
 		{
 			cpkl_free(newsh);
 			return NULL;
@@ -1907,8 +2040,8 @@ CPKL_FCTDEL_DEFINE(cpkl_sh_t)
 	 */
 
 	/* destroy the sig if needed */
-	if (sh->needsig)
-		cpkl_sigdsty(&(sh->sig));
+	if (sh->needlock)
+		cpkl_mtxdsty(&(sh->mtx));
 
 	cpkl_free(sh);
 }
@@ -1918,9 +2051,9 @@ void *cpkl_shalloc(cpkl_sh_t *sh)
 	cpkl_shs_t *shs;
 	cpkl_nfblock_t *fp = NULL;
 
-	if (sh->needsig)
+	if (sh->needlock)
 	{
-		cpkl_sigwait(&(sh->sig));
+		cpkl_mtxlock(&(sh->mtx));
 	}
 
 	if (!(CPKL_LISTISEMPLY(&(sh->hfh))))		/* likely */
@@ -1995,9 +2128,9 @@ void *cpkl_shalloc(cpkl_sh_t *sh)
 #endif
 
 cpkl_shalloc_ret:
-	if (sh->needsig)
+	if (sh->needlock)
 	{
-		cpkl_sigsend(&(sh->sig));
+		cpkl_mtxunlock(&(sh->mtx));
 	}
 
 	return (void *)fp;
@@ -2022,9 +2155,9 @@ void cpkl_shfree(cpkl_sh_t *sh, void *blk)
 	}
 	dstshs = CPKL_GETCONTAINER(dstshs, cpkl_shs_t, spbst);
 
-	if (sh->needsig)
+	if (sh->needlock)
 	{
-		cpkl_sigwait(&(sh->sig));
+		cpkl_mtxlock(&(sh->mtx));
 	}
 
 	/* insert this block into slab's freelist */
@@ -2068,9 +2201,9 @@ void cpkl_shfree(cpkl_sh_t *sh, void *blk)
 	(sh->n_cb)--;
 #endif
 
-	if (sh->needsig)
+	if (sh->needlock)
 	{
-		cpkl_sigsend(&(sh->sig));
+		cpkl_mtxunlock(&(sh->mtx));
 	}
 }
 
@@ -2135,9 +2268,9 @@ void cpkl_shdrainslb(cpkl_sh_t *sh)
 	if (CPKL_LISTISEMPLY(&(sh->afh)))
 		return;
 
-	if (sh->needsig)
+	if (sh->needlock)
 	{
-		cpkl_sigwait(&(sh->sig));
+		cpkl_mtxlock(&(sh->mtx));
 	}
 
 	CPKL_LISTENTRYWALK_SAVE(p, n, cpkl_shs_t, &(sh->afh), curslb)		/* all free list */
@@ -2152,9 +2285,9 @@ void cpkl_shdrainslb(cpkl_sh_t *sh)
 	(sh->n_sd)++;
 #endif
 
-	if (sh->needsig)
+	if (sh->needlock)
 	{
-		cpkl_sigsend(&(sh->sig));
+		cpkl_mtxunlock(&(sh->mtx));
 	}
 }
 
@@ -3687,7 +3820,7 @@ static int cpkl_tppubent(void *param)
 	CPKL_ASSERT(tidx == tpslot->slotidx);
 #endif
 	cpkl_tpblktsk_t *blktsk;
-	while (1)
+	while (!(tpslot->tmflag))
 	{
 		tpslot->state = CPKL_TPSTATE_IDLE;
 		/* wait for the signal */
@@ -3697,7 +3830,7 @@ static int cpkl_tppubent(void *param)
 		while (tpslot->n_blktsk)
 		{
 			/* lock the list */
-			cpkl_sigwait(&(tpslot->listlock));
+			cpkl_mtxlock(&(tpslot->listlock));
 
 			/* remove the tail entry of blocked list */
 			blktsk = CPKL_GETCONTAINER(tpslot->blktsk.prev, cpkl_tpblktsk_t, node);
@@ -3705,7 +3838,7 @@ static int cpkl_tppubent(void *param)
 			(tpslot->n_blktsk)--;
 
 			/* unlock the list */
-			cpkl_sigsend(&(tpslot->listlock));
+			cpkl_mtxunlock(&(tpslot->listlock));
 
 			/* run the task function */
 			blktsk->entry(blktsk->param);
@@ -3722,11 +3855,14 @@ static int cpkl_tppubent(void *param)
 			cpkl_free(blktsk);
 		}
 	}
+
+	cpkl_sigsend(&(tpslot->teminalsig));
+	
 	return 0;
 }
 
 /* this is the global unique thread pool init */
-int cpkl_tpinit(u32 n_thread)
+int cpkl_tpstart(u32 n_thread)
 {
 	u32 i;
 	unique_tp.n_tpslot = n_thread;
@@ -3736,9 +3872,11 @@ int cpkl_tpinit(u32 n_thread)
 		cpkl_sigcreate(&(unique_tp.tpslotlist[i].tskblksig), 0, 1);
 
 		/* init the list lock, make sure it's signaled after init */
-		cpkl_sigcreate(&(unique_tp.tpslotlist[i].listlock), 1, 1);
+		cpkl_mtxcreate(&(unique_tp.tpslotlist[i].listlock));
 		/* after init, without ant block task at all */
 		cpkl_initlisthead(&(unique_tp.tpslotlist[i].blktsk));
+
+		unique_tp.tpslotlist[i].tmflag = 0;
 		unique_tp.tpslotlist[i].n_blktsk = 0;
 		unique_tp.tpslotlist[i].n_cum = 0;
 		unique_tp.tpslotlist[i].state = CPKL_TPSTATE_IDLE;
@@ -3766,6 +3904,29 @@ int cpkl_tpinit(u32 n_thread)
 	return 0;
 }
 
+/* wait for all thread terminated */
+void cpkl_tpstop(void)
+{
+	u32 i;
+
+	for (i = 0; i < unique_tp.n_tpslot; i++)
+	{
+		cpkl_sigcreate(&(unique_tp.tpslotlist[i].teminalsig), 0, 1);
+		unique_tp.tpslotlist[i].tmflag = 1;
+		cpkl_sigsend(&(unique_tp.tpslotlist[i].tskblksig));
+	}
+
+	for (i = 0; i < unique_tp.n_tpslot; i++)
+		cpkl_sigwait(&(unique_tp.tpslotlist[i].teminalsig));
+
+	for (i = 0; i < unique_tp.n_tpslot; i++)
+	{
+		cpkl_sigdsty(&(unique_tp.tpslotlist[i].tskblksig));
+		cpkl_sigdsty(&(unique_tp.tpslotlist[i].teminalsig));
+		cpkl_mtxdsty(&((unique_tp.tpslotlist[i].listlock)));
+	}
+}
+
 int cpkl_tpinsert(cpkl_tpentry entry, void *param, cpkl_custsig_t *tersig)
 {
 	static unsigned i = 0;
@@ -3782,13 +3943,13 @@ int cpkl_tpinsert(cpkl_tpentry entry, void *param, cpkl_custsig_t *tersig)
  
 	/* let's insert this new block task */
 	/* lock the list */
-	cpkl_sigwait(&(dstslot->listlock));
+	cpkl_mtxlock(&(dstslot->listlock));
 
 	cpkl_listadd(&(newtsk->node), &(dstslot->blktsk));
 	(dstslot->n_blktsk)++;
 
 	/* unlock the list */
-	cpkl_sigsend(&(dstslot->listlock));
+	cpkl_mtxunlock(&(dstslot->listlock));
 
 	/* wake up the work thread */
 	cpkl_sigsend(&(dstslot->tskblksig));

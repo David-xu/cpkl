@@ -12,6 +12,9 @@
 /* close the debug switch, it will run much more faster */
 #define CPKL_CONFIG_DEBUG
 
+/* atomic operation */
+#define CPKL_CONFIG_ATOMIC
+
 /* time statistic switch, we use it to statis the procedure time consumption */
 #define CPKL_CONFIG_TMS
 
@@ -145,6 +148,7 @@
 
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 
+
 #include <linux/kernel.h>
 #include <linux/semaphore.h>
 #include <linux/sched.h>
@@ -229,6 +233,66 @@ CODE_SECTION("====================")
 #define CPKL_FCTNEW(type, param)				(type *)cpkl_new_##type(param)
 #define CPKL_FCTDEL_DEFINE(type)				void cpkl_delete_##type(void *obj)
 #define CPKL_FCTDEL(type, obj)					cpkl_delete_##type(obj)
+
+CODE_SECTION("====================")
+CODE_SECTION("Atomic operation")
+CODE_SECTION("====================")
+typedef struct _cpkl_atomic {
+	volatile long long		__v;
+} cpkl_atomic_t;
+
+#ifdef CPKL_CONFIG_ATOMIC
+/*
+ * we use some gcc builtin functions, so gcc is prerequisite under linux platform.
+ */
+static inline long long cpkl_atomic_add(cpkl_atomic_t *atom, long long val)
+{
+	long long __ret;
+#if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+	__ret = InterlockedExchangeAdd64(&(atom->__v), val);
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+	__ret = __sync_add_and_fetch(&(atom->__v), val);
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
+
+#else
+	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
+#endif
+
+	return __ret;
+}
+
+static inline long long cpkl_atomic_sub(cpkl_atomic_t *atom, long long val)
+{
+	long long __ret;
+#if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+	__ret = InterlockedExchangeSubtract((u64 *)&(atom->__v), (u64)val);
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+	__ret = __sync_sub_and_fetch(&(atom->__v), val);
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
+
+#else
+	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
+#endif
+
+	return __ret;
+}
+
+
+#else
+
+static inline long long cpkl_atomic_add(cpkl_atomic_t *atom, long long val)
+{
+	atom->__v += val;
+	return atom->__v;
+}
+
+static inline long long cpkl_atomic_sub(cpkl_atomic_t *atom, long long val)
+{
+	atom->__v -= val;
+	return atom->__v;
+}
+
+#endif
 
 CODE_SECTION("====================")
 CODE_SECTION("Double LinkList")
@@ -542,6 +606,43 @@ int _cpkl_sigwait(cpkl_custsig_t *sig, const char *filename, const char *funcnam
 #define cpkl_sigwait(sig)	_cpkl_sigwait(sig, __FILE__, __FUNCTION__, __LINE__)
 
 CODE_SECTION("====================")
+CODE_SECTION("Custom Mutex")
+CODE_SECTION("====================")
+
+typedef struct _cpkl_custmtx {
+#if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+	HANDLE			mtx;
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+	pthread_mutex_t	mtx;
+#elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
+#else
+	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
+#endif
+
+#ifdef CPKL_CONFIG_DEBUG
+	u64 tmsum;
+	u64 times;
+#endif
+
+} cpkl_custmtx_t;
+
+int _cpkl_mtxcreate(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line);
+#define cpkl_mtxcreate(mtx)		_cpkl_mtxcreate(mtx, __FILE__, __FUNCTION__, __LINE__)
+
+void _cpkl_mtxdsty(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line);
+#define cpkl_mtxdsty(mtx)		_cpkl_mtxdsty(mtx, __FILE__, __FUNCTION__, __LINE__)
+
+int _cpkl_mtxlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line);
+#define cpkl_mtxlock(mtx)		_cpkl_mtxlock(mtx, __FILE__, __FUNCTION__, __LINE__)
+
+int _cpkl_mtxtrylock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line);
+#define cpkl_mtxtrylock(mtx)	_cpkl_mtxtrylock(mtx, __FILE__, __FUNCTION__, __LINE__)
+
+void _cpkl_mtxunlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line);
+#define cpkl_mtxunlock(mtx)		_cpkl_mtxunlock(mtx, __FILE__, __FUNCTION__, __LINE__)
+
+
+CODE_SECTION("====================")
 CODE_SECTION("Binary Search Tree")
 CODE_SECTION("====================")
 
@@ -704,8 +805,8 @@ typedef struct _cpkl_sh {
 	u32					s_slb;					/* size of slab, include the mngt's size */
 	u32					s_blk;					/* size of block */
 	u32					bps;					/* number of blocks per slab */
-	cpkl_custsig_t		sig;					/* when used in multi thread env, we need it */
-	u32					needsig;
+	cpkl_custmtx_t		mtx;					/* when used in multi thread env, we need it */
+	u32					needlock;
 
 	/* number of 'all free' 'half free' and 'no free' slabs */
 	u32					n_afs, n_hfs, n_nfs;
@@ -720,7 +821,7 @@ typedef struct _cpkl_sh {
 
 typedef struct _cpkl_shfcp {
 	u32 s_blk, s_slb;
-	u32 needsig;
+	u32 needlock;
 } cpkl_shfcp_t;
 
 CPKL_FCTNEW_DEFINE(cpkl_sh_t);
@@ -1035,9 +1136,13 @@ typedef struct _cpkl_tpblktsk {
 typedef struct _cpkl_tpslot {
 	/* send sig to this slot when there are block tasks exist. */
 	cpkl_custsig_t tskblksig;
+
+	/*  */
+	cpkl_custsig_t teminalsig;
+	u32			tmflag;
 	
 	/* lock this slot during the task insert and remove operation */
-	cpkl_custsig_t listlock;
+	cpkl_custmtx_t listlock;
 	cpkl_listhead_t blktsk;			/* hsp_tpblktask_t entry list */
 	u32			n_blktsk;			/* now there is number of n_blktsk tasks blocked */
 	u32			n_cum;				/* cumulate tasks in this work thread */
@@ -1062,11 +1167,13 @@ typedef struct _cpkl_threadpool {
 #endif
 } cpkl_threadpool_t;
 
-int cpkl_tpinit(u32 n_thread);
+int cpkl_tpstart(u32 n_thread);
+void cpkl_tpstop(void);
 void cpkl_tpstat(void);
 #else
-#define cpkl_tpinit(n)			(void)0
-#define cpkl_tpstat()			(void)0
+static inline int cpkl_tpstart(u32 n_thread) {return 0;}
+static inline void cpkl_tpstop(void) {}
+static inline void cpkl_tpstat(void) {}
 #endif
 int cpkl_tpinsert(cpkl_tpentry entry, void *param, cpkl_custsig_t *tersig);
 
