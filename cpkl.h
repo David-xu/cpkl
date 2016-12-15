@@ -32,7 +32,7 @@
 // #define CPKL_CONFIG_COSTUM_RPINTF
 
 /* float number support, some times CPU may NOT support the float point number */
-// #define CPKL_CONFIG_FNS
+#define CPKL_CONFIG_FNS
 
 /* timer link impl, kernel mode has not support, need to complete */
 #define CPKL_CONFIG_TIMERLINK
@@ -1118,7 +1118,7 @@ typedef int (*cpkl_tpentry)(void *param);
 #ifdef CPKL_CONFIG_THREADPOLL
 
 #ifndef CPKL_CONFIG_TPMAXTHREAD
-#define	CPKL_CONFIG_TPMAXTHREAD				(8)
+#define	CPKL_CONFIG_TPMAXTHREAD				(16)
 #endif
 
 enum {
