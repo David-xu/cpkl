@@ -251,7 +251,7 @@ static inline long long cpkl_atomic_add(cpkl_atomic_t *atom, long long val)
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
 	__ret = InterlockedExchangeAdd64(&(atom->__v), val);
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
-	__ret = __sync_add_and_fetch(&(atom->__v), val);
+	__ret = __sync_fetch_and_add(&(atom->__v), val);
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 
 #else
@@ -267,7 +267,7 @@ static inline long long cpkl_atomic_sub(cpkl_atomic_t *atom, long long val)
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
 	__ret = InterlockedExchangeSubtract((u64 *)&(atom->__v), (u64)val);
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
-	__ret = __sync_sub_and_fetch(&(atom->__v), val);
+	__ret = __sync_fetch_and_sub(&(atom->__v), val);
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 
 #else
@@ -1200,6 +1200,7 @@ typedef struct _cpkl_tmentry {
 	cpkl_tmhandle	handle;
 	void	*param;
 	u32		n_tm, n_count;					/* number of public inteval */
+	u32		id;
 } cpkl_tmentry_t;
 
 enum {
@@ -1212,7 +1213,7 @@ enum {
 
 typedef struct _cpkl_tmlk {
 	cpkl_listhead_t		tml;
-	cpkl_custsig_t		tml_lock;
+	cpkl_custmtx_t		tml_lock;
 	u32					tmst;
 	u32					pubintv;			/* ms */
 } cpkl_tmlk_t; 
@@ -1222,13 +1223,15 @@ int cpkl_tmlkinit(u32 pubintv);
 
 /* register timer */
 int cpkl_tmreg(u32 n_pubintv, cpkl_tmhandle handle, void *param);
+/* unregister timer */
+void cpkl_tmunreg(u32 id);
 #else
 
 /* pubintv: ms */
-static int cpkl_tmlkinit(u32 pubintv) {return -1;}
+static inline int cpkl_tmlkinit(u32 pubintv) {return -1;}
 
-/* register timer */
-static int cpkl_tmreg(u32 n_pubintv, cpkl_tmhandle handle, void *param) {return -1;}
+static inline int cpkl_tmreg(u32 n_pubintv, cpkl_tmhandle handle, void *param) {return -1;}
+static inline void cpkl_tmunreg(u32 id) {}
 
 #endif
 

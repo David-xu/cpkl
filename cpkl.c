@@ -809,7 +809,7 @@ CODE_SECTION("====================")
 int _cpkl_mtxcreate(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
 {
 	int ret = 0;
-
+	
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
 	mtx->mtx = CreateMutex(NULL, FALSE, NULL);
 	if (mtx->mtx == NULL)
@@ -880,7 +880,6 @@ int _cpkl_mtxlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32
 #else
 	#error "Platform not support, check the MACRO 'CPKL_CONFIG_PLATFORM' definition."
 #endif
-
 
 #ifdef CPKL_CONFIG_DEBUG
 	mtx->tmsum += (cpkl_tmsstamp() - tmbg);
@@ -4262,6 +4261,8 @@ static void cpkl_tmpub(void)
 
 	CPKL_ASSERT(!CPKL_LISTISEMPLY(&(tmlk.tml)));
 
+	cpkl_mtxlock(&(tmlk.tml_lock));
+
 	CPKL_LISTENTRYWALK(p, cpkl_tmentry_t, &(tmlk.tml), ln)
 	{
 		(p->n_count)--;
@@ -4273,6 +4274,8 @@ static void cpkl_tmpub(void)
 			p->handle(p->param);
 		}
 	}
+
+	cpkl_mtxunlock(&(tmlk.tml_lock));
 }
 
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
@@ -4314,7 +4317,7 @@ int cpkl_tmlkinit(u32 pubintv)
 	}
 
 	cpkl_initlisthead(&(tmlk.tml));
-	cpkl_sigcreate(&(tmlk.tml_lock), 1, 1);
+	cpkl_mtxcreate(&(tmlk.tml_lock));
 	tmlk.tmst = CPKL_TMLKSTATE_PUBTMSTOP;
 	tmlk.pubintv = pubintv;
 
@@ -4324,6 +4327,8 @@ int cpkl_tmlkinit(u32 pubintv)
 /* register timer */
 int cpkl_tmreg(u32 n_pubintv, cpkl_tmhandle handle, void *param)
 {
+	static u32 _id = 0;
+
 	if ((n_pubintv == 0) || (tmlk.tmst == CPKL_TMLKSTATE_UNINIT))
 		return -1;
 
@@ -4334,18 +4339,29 @@ int cpkl_tmreg(u32 n_pubintv, cpkl_tmhandle handle, void *param)
 	newtm->handle = handle;
 	newtm->param = param;
 	newtm->n_tm = newtm->n_count = n_pubintv;
+	newtm->id = ++_id;
 
-	cpkl_sigwait(&(tmlk.tml_lock));
+	cpkl_mtxlock(&(tmlk.tml_lock));
 	cpkl_listadd(&(newtm->ln), &(tmlk.tml));
-	cpkl_sigsend(&(tmlk.tml_lock));
+	cpkl_mtxunlock(&(tmlk.tml_lock));
 
-	return 0;
+	return newtm->id;
 }
 
 /* unregister timer */
-int cpkl_tmunreg(u32 n_pubintv, cpkl_tmhandle handle, void *param)
+void cpkl_tmunreg(u32 id)
 {
-	return -1;
+	cpkl_tmentry_t *p, *n;
+
+	cpkl_mtxlock(&(tmlk.tml_lock));
+
+	CPKL_LISTENTRYWALK_SAVE(p, n, cpkl_tmentry_t, &(tmlk.tml), ln)
+	{
+		if (p->id == id)
+			cpkl_listdel(&(p->ln));
+	}
+
+	cpkl_mtxunlock(&(tmlk.tml_lock));
 }
 
 #endif
