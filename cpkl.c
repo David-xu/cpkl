@@ -809,7 +809,7 @@ CODE_SECTION("====================")
 int _cpkl_mtxcreate(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
 {
 	int ret = 0;
-	
+
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
 	mtx->mtx = CreateMutex(NULL, FALSE, NULL);
 	if (mtx->mtx == NULL)
@@ -1671,7 +1671,7 @@ static u32				cpkl_mmstatinit = 0;
 static cpkl_bstn_t		*cpkl_mmroot = NULL;
 
 /* in the multi thread env, we need to protect the hsp_malloc and hsp_free */
-static cpkl_custsig_t	cpkl_mmlocker;
+static cpkl_custmtx_t	cpkl_mmlocker;
 
 /* memory statinfo */
 static cpkl_mmstat_t	cpkl_mmstat = {0};
@@ -1703,7 +1703,7 @@ static int cpkl_mmchkwalk(cpkl_bstn_t *n1, void *param)
 
 static void cpkl_mminit(void)
 {
-	cpkl_sigcreate(&cpkl_mmlocker, 1, 1);
+	cpkl_mtxcreate(&cpkl_mmlocker);
 	cpkl_mmstatinit = 1;
 }
 
@@ -1731,7 +1731,7 @@ void *_cpkl_malloc
 	}
 
 	/* we need to get locker */
-	cpkl_sigwait(&cpkl_mmlocker);
+	cpkl_mtxlock(&cpkl_mmlocker);
 
 	cpkl_mmstat.real += size;
 	cpkl_mmstat.occupy += occupy;
@@ -1748,7 +1748,7 @@ void *_cpkl_malloc
 	CPKL_ASSERT(cpkl_bst_insert(&cpkl_mmroot, &(p->bstn), cpkl_mmrgcmp) == 0);
 
 	/* release locker */
-	cpkl_sigsend(&cpkl_mmlocker);
+	cpkl_mtxunlock(&cpkl_mmlocker);
 
 	p->filename = filename;
 	p->funcname = funcname;
@@ -1781,7 +1781,7 @@ void _cpkl_free
 	cpkl_bstn_t *dstbst;
 
 	/* we need to get locker */
-	cpkl_sigwait(&cpkl_mmlocker);
+	cpkl_mtxlock(&cpkl_mmlocker);
 
 	dstbst = cpkl_bst_lkup(cpkl_mmroot, &(_p->bstn), cpkl_mmrgcmp);
 	if (dstbst == NULL)
@@ -1797,7 +1797,7 @@ void _cpkl_free
 	cpkl_mmstat.occupy -= _p->s_occupy;
 
 	/* release locker */
-	cpkl_sigsend(&cpkl_mmlocker);
+	cpkl_mtxunlock(&cpkl_mmlocker);
 
 	cpkl_pdf_free(_p);
 }
@@ -1808,7 +1808,7 @@ void cpkl_mmcheck(void)
 		cpkl_mminit();
 
 	/* we need to get locker */
-	cpkl_sigwait(&cpkl_mmlocker);
+	cpkl_mtxlock(&cpkl_mmlocker);
 
 	if (cpkl_mmroot == NULL)
 	{
@@ -1833,7 +1833,7 @@ void cpkl_mmcheck(void)
 				cpkl_mmstat.real_max >> 20, (cpkl_mmstat.real_max >> 10) & ((0x1 << 10) - 1),
 				cpkl_mmstat.occupy_max >> 20, (cpkl_mmstat.occupy_max >> 10) & ((0x1 << 10) - 1));
 	/* release locker */
-	cpkl_sigsend(&cpkl_mmlocker);
+	cpkl_mtxunlock(&cpkl_mmlocker);
 #ifdef CPKL_CONFIG_DEBUG
 	/* tmstat */
 	cpkl_printf("cpkl_mmcheck(), sigblocktime: %lld(us), times: %lld\n",
