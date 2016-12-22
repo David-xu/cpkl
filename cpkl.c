@@ -460,7 +460,7 @@ CODE_SECTION("====================")
 /*
  * return: the us of current time
  */
-static u64 cpkl_tmsstamp(void)
+u64 cpkl_tmsstamp(void)
 {
 	u64	stamp = 0;
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
@@ -511,7 +511,7 @@ static void cpkl_tmsrepone(int tmsidx)
 		cpkl_printf("tms %2d just take off.\n", tmsidx);
 	}
 
-	cpkl_pdf_sprintf(fmtstr, "\"%%%ds\" tms[%%2d] : %%10llu(us)\n", CPKL_TMSCOMMLEN);
+	cpkl_pdf_sprintf(fmtstr, 128, "\"%%%ds\" tms[%%2d] : %%10llu(us)\n", CPKL_TMSCOMMLEN);
     cpkl_printf(fmtstr,
 				_cpkl_tmsar[tmsidx].comm,
 				tmsidx,
@@ -811,11 +811,16 @@ int _cpkl_mtxcreate(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u
 	int ret = 0;
 
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+#ifdef CPKL_MUTEX_CS
+	InitializeCriticalSection(&(mtx->cs));
+#else
 	mtx->mtx = CreateMutex(NULL, FALSE, NULL);
+
 	if (mtx->mtx == NULL)
 	{
 		ret = -1;
 	}
+#endif
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 	if (pthread_mutex_init(&(mtx->mtx), NULL) != 0)
 	{
@@ -836,7 +841,11 @@ int _cpkl_mtxcreate(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u
 void _cpkl_mtxdsty(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
 {
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+#ifdef CPKL_MUTEX_CS
+	DeleteCriticalSection(&(mtx->cs));
+#else
 	CloseHandle(mtx->mtx);
+#endif
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 	pthread_mutex_destroy(&(mtx->mtx));
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
@@ -864,7 +873,11 @@ int _cpkl_mtxlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32
 	int ret = 0;
 
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+#ifdef CPKL_MUTEX_CS
+	EnterCriticalSection(&(mtx->cs));
+#else
 	WaitForSingleObject(mtx->mtx, INFINITE);
+#endif
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 	if (pthread_mutex_lock(&(mtx->mtx)) != 0)
 	{
@@ -894,7 +907,11 @@ int _cpkl_mtxtrylock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, 
 	int ret = 0;
 
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+#ifdef CPKL_MUTEX_CS
+	EnterCriticalSection(&(mtx->cs));
+#else
 	ret = WaitForSingleObject(mtx->mtx, 0);
+#endif
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 	ret = pthread_mutex_trylock(&(mtx->mtx));
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
@@ -913,7 +930,11 @@ int _cpkl_mtxtrylock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, 
 void _cpkl_mtxunlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32 line)
 {
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+#ifdef CPKL_MUTEX_CS
+	LeaveCriticalSection(&(mtx->cs));
+#else
 	ReleaseMutex(mtx->mtx);
+#endif
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 	if (pthread_mutex_unlock(&(mtx->mtx)) != 0)
 	{
@@ -2001,12 +2022,12 @@ CPKL_FCTNEW_DEFINE(cpkl_sh_t)
 	}
 
 	newsh->n_afs = newsh->n_hfs = newsh->n_nfs = 0;
+	newsh->n_cb = 0;
 
 #ifdef CPKL_CONFIG_DEBUG
 	newsh->n_ea = 0;
 	newsh->n_ef = 0;
 	newsh->n_sd = 0;
-	newsh->n_cb = 0;
 #endif
 
 	return newsh;
@@ -2122,9 +2143,7 @@ void *cpkl_shalloc(cpkl_sh_t *sh)
 		(sh->n_nfs)++;
 	}
 
-#ifdef CPKL_CONFIG_DEBUG
 	(sh->n_cb)++;
-#endif
 
 cpkl_shalloc_ret:
 	if (sh->needlock)
@@ -2196,9 +2215,7 @@ void cpkl_shfree(cpkl_sh_t *sh, void *blk)
 		cpkl_bst_remove(&(sh->slbtroot), &(dstshs->spbst));
 	}
 
-#ifdef CPKL_CONFIG_DEBUG
 	(sh->n_cb)--;
-#endif
 
 	if (sh->needlock)
 	{
@@ -2255,9 +2272,7 @@ void cpkl_shreset(cpkl_sh_t *sh)
 	sh->n_hfs = 0;
 	sh->n_nfs = 0;
 
-#ifdef CPKL_CONFIG_DEBUG
 	sh->n_cb = 0;
-#endif
 }
 
 void cpkl_shdrainslb(cpkl_sh_t *sh)

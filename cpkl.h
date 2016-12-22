@@ -106,13 +106,18 @@
 #define cpkl_pdf_fread			fread
 #define cpkl_pdf_fprintf		fprintf
 
+#define cpkl_pdf_usleep(n)		Sleep((n) / 1000)
+
 #define CPKL_PATHDASH			"\\"
+
+#define CPKL_MUTEX_CS
 
 #define __attribute__(attib)
 
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -143,6 +148,8 @@
 #define cpkl_pdf_fgets			fgets
 #define cpkl_pdf_fread			fread
 #define cpkl_pdf_fprintf		fprintf
+
+#define cpkl_pdf_usleep			usleep
 
 #define CPKL_PATHDASH			"/"
 
@@ -282,14 +289,16 @@ static inline long long cpkl_atomic_sub(cpkl_atomic_t *atom, long long val)
 
 static inline long long cpkl_atomic_add(cpkl_atomic_t *atom, long long val)
 {
+	long long _tmp = atom->__v;
 	atom->__v += val;
-	return atom->__v;
+	return _tmp;
 }
 
 static inline long long cpkl_atomic_sub(cpkl_atomic_t *atom, long long val)
 {
+	long long _tmp = atom->__v;
 	atom->__v -= val;
-	return atom->__v;
+	return _tmp;
 }
 
 #endif
@@ -523,12 +532,17 @@ CODE_SECTION("====================")
 
 #define CPKL_TMSREPORTALL				((int)-1)
 
-#ifdef CPKL_CONFIG_TMS
-
 enum {
 	CPKL_TMS_OFF = 0,
 	CPKL_TMS_ON,				/* time statistic switch on */
 };
+
+/*
+ * return: the us of current time
+ */
+u64 cpkl_tmsstamp(void);
+
+#ifdef CPKL_CONFIG_TMS
 
 void cpkl_tms(int tmsidx, int swch);
 /* we can add some commment with the time statistic */
@@ -541,10 +555,9 @@ void cpkl_tmreport(int tmsidx);
  * set the @swch with CPKL_TMS_ON to turn on the tms or
  * set it with CPKL_TMS_OFF to turn off
  */
-static inline void cpkl_tms(int tmsidx, int swch){}
-static inline void cpkl_tmsreset(int tmsidx, char *comm)
-{}
-void cpkl_tmreport(int tmsidx){}
+static inline void cpkl_tms(int tmsidx, int swch) {}
+static inline void cpkl_tmsreset(int tmsidx, char *comm) {}
+static inline void cpkl_tmreport(int tmsidx) {}
 #endif
 
 CODE_SECTION("====================")
@@ -611,7 +624,11 @@ CODE_SECTION("====================")
 
 typedef struct _cpkl_custmtx {
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
+#ifdef CPKL_MUTEX_CS
+	CRITICAL_SECTION	cs;
+#else
 	HANDLE			mtx;
+#endif
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 	pthread_mutex_t	mtx;
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
@@ -810,12 +827,12 @@ typedef struct _cpkl_sh {
 
 	/* number of 'all free' 'half free' and 'no free' slabs */
 	u32					n_afs, n_hfs, n_nfs;
+	u32					n_cb;					/* number of current blocks */
 
 #ifdef CPKL_CONFIG_DEBUG
 	u32					n_ea;					/* times of error alloc */
 	u32					n_ef;					/* times of error free */
 	u32					n_sd;					/* times of success drain */
-	u32					n_cb;					/* number of current blocks */
 #endif
 } cpkl_sh_t;
 
