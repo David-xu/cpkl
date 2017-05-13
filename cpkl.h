@@ -31,6 +31,9 @@
 /* redirection the printing */
 // #define CPKL_CONFIG_COSTUM_RPINTF
 
+/* print with timestamp like [sec.usec]: ... */
+// #define CPKL_CONFIG_PRINT_TMSTAMP
+
 /* float number support, some times CPU may NOT support the float point number */
 #define CPKL_CONFIG_FNS
 
@@ -117,14 +120,16 @@
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 #include <semaphore.h>
 #include <errno.h>
-#include <sys/time.h>
 #include <pthread.h>
+#include <sys/time.h>
+#include <sys/types.h>
 
 #define cpkl_pdf_malloc			malloc
 #define cpkl_pdf_free			free
@@ -153,8 +158,13 @@
 
 #define CPKL_PATHDASH			"/"
 
+#define CPKL_CONFIG_TMBYSELECT
+
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 
+#ifdef CPKL_CONFIG_PRINT_TMSTAMP
+#undef CPKL_CONFIG_PRINT_TMSTAMP
+#endif
 
 #include <linux/kernel.h>
 #include <linux/semaphore.h>
@@ -210,26 +220,29 @@ typedef u64						sz_t;
 #error "ALU operator width not support, check the MARCO 'CPKL_CONFIG_ALUWIDTH' definition."
 #endif
 
+#define CPKL_ARRAY_SIZE(ar)		(sizeof(ar) / sizeof((ar)[0]))
+
 /* some special value which CPKL used */
 #define	CPKL_INVALID_IDX		((u32)(-1))
-
-#ifdef CPKL_CONFIG_COSTUM_RPINTF
-#else
-#define	cpkl_printf				cpkl_pdf_printf
-#define cpkl_sprintf			cpkl_pdf_sprintf
-#endif
 
 #ifdef CPKL_CONFIG_DEBUG
 #define CPKL_ASSERT(cond)												\
 	do {																\
 		if (!(cond))													\
 		{																\
-			cpkl_printf("%s:%d, %s\n", __FILE__, __LINE__, #cond);		\
+			cpkl_printf("\n%s:%d, %s", __FILE__, __LINE__, #cond);		\
 			while (1);													\
 		}																\
 	} while (0)
 #else
-#define CPKL_ASSERT(cond)		(void)(cond);
+#define CPKL_ASSERT(cond)		do {(void)(cond);} while(0);
+#endif
+
+#ifdef CPKL_CONFIG_PRINT_TMSTAMP
+int cpkl_printf(const char *fmt, ...);
+#else
+/* no need time stamp, just call platform printf */
+#define cpkl_printf				cpkl_pdf_printf
 #endif
 
 CODE_SECTION("====================")
@@ -511,7 +524,7 @@ static inline u32 cpkl_alg_getbw32(u32 src)
 	}
 	if (src & 0x1)
 		len += 1;
-	
+
 	return len;
 }
 
@@ -524,7 +537,7 @@ void *cpkl_alg_bsch(void *base, unsigned num, unsigned width, void *dst, int (*c
 #define CPKL_STDIVCTRL_EMPTYSUBSTR			0x1
 int cpkl_stdiv(char *buf, int buflen, int n_argv, char *argv[], u32 len[], int n_divflag, char *divflag, u32 ctrl);
 void cpkl_bswap(void *p, u32 size);
-void cpkl_hexdump(void *buf, u32 len);
+void cpkl_hexdump(void *buf, u32 len, char *prefix);
 
 CODE_SECTION("====================")
 CODE_SECTION("Time statistic")
@@ -546,8 +559,7 @@ u64 cpkl_tmsstamp(void);
 
 void cpkl_tms(int tmsidx, int swch);
 /* we can add some commment with the time statistic */
-void cpkl_tmsreset(int tmsidx, char *comm)
-;
+void cpkl_tmsreset(int tmsidx, char *comm);
 /*  */
 void cpkl_tmreport(int tmsidx);
 #else
@@ -558,6 +570,15 @@ void cpkl_tmreport(int tmsidx);
 static inline void cpkl_tms(int tmsidx, int swch) {}
 static inline void cpkl_tmsreset(int tmsidx, char *comm) {}
 static inline void cpkl_tmreport(int tmsidx) {}
+#endif
+
+CODE_SECTION("====================")
+CODE_SECTION("custom print")
+CODE_SECTION("====================")
+#ifdef CPKL_CONFIG_COSTUM_RPINTF
+/* import this function, just redirect the printf into some special device */
+extern int cpkl_import_custprintf(const char *fmt, ...);
+#define cpkl_pdf_printf				cpkl_import_custprintf
 #endif
 
 CODE_SECTION("====================")
@@ -784,7 +805,7 @@ CODE_SECTION("====================")
 
 /*
  * This is the slabheap infrastruct definision
- * We manage all the halffree and nofree slabs 
+ * We manage all the halffree and nofree slabs
  */
 
 #define CPKL_SLABHEAP_NOMORE				NULL
@@ -808,7 +829,7 @@ typedef struct _cpkl_shs {
 /* slabheap */
 typedef struct _cpkl_sh {
 	/*
-	 * af: all free 
+	 * af: all free
 	 * hf: half free
 	 * nf: no free
 	 */
@@ -818,7 +839,7 @@ typedef struct _cpkl_sh {
 	 * when free blocks, we find the corresponding slab struct by this BST
 	 */
 	cpkl_bstn_t			*slbtroot;
-	
+
 	u32					s_slb;					/* size of slab, include the mngt's size */
 	u32					s_blk;					/* size of block */
 	u32					bps;					/* number of blocks per slab */
@@ -1049,7 +1070,7 @@ typedef enum _cpkl_cpstate {
 
 	cpkl_cps_tag,				//
 	cpkl_cps_body,
-	
+
 	cpkl_cps_pa,				/* prepare to annotate */
 	cpkl_cps_la,				/* line annotation */
 	cpkl_cps_ba,				/* block annotation */
@@ -1157,7 +1178,7 @@ typedef struct _cpkl_tpslot {
 	/*  */
 	cpkl_custsig_t teminalsig;
 	u32			tmflag;
-	
+
 	/* lock this slot during the task insert and remove operation */
 	cpkl_custmtx_t listlock;
 	cpkl_listhead_t blktsk;			/* hsp_tpblktask_t entry list */
@@ -1172,11 +1193,12 @@ typedef struct _cpkl_tpslot {
 
 typedef struct _cpkl_threadpool {
 	/*  */
-	cpkl_tpslot_t tpslotlist[CPKL_CONFIG_TPMAXTHREAD];
-	u32			 n_tpslot;		/* this the number of thread in the pool */
-	
+	cpkl_tpslot_t	tpslotlist[CPKL_CONFIG_TPMAXTHREAD];
+	u32				n_tpslot;		/* this the number of thread in the pool */
+	u32				init_flag;
+
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
-	
+
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
 	pthread_t thdesc[CPKL_CONFIG_TPMAXTHREAD];
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
@@ -1233,7 +1255,7 @@ typedef struct _cpkl_tmlk {
 	cpkl_custmtx_t		tml_lock;
 	u32					tmst;
 	u32					pubintv;			/* ms */
-} cpkl_tmlk_t; 
+} cpkl_tmlk_t;
 
 /* pubintv: ms */
 int cpkl_tmlkinit(u32 pubintv);

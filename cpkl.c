@@ -78,10 +78,10 @@ static void cpkl_alg_getrmd(const void *pv, u32 pvlen, const void *dvsr, u32 dvs
 	i = pvlen * 8 - srcwidth;
 	while (i--)
 		cpkl_alg_bs((u8 *)pv, pvlen);
-	
+
 	cpkl_pdf_memset(dvbuf, 0, CPKL_CONFIG_MAXDVLEN);
 
-	counter = srcwidth;	
+	counter = srcwidth;
 
 	while (counter--)
 	{
@@ -110,12 +110,12 @@ static void cpkl_alg_getrmd(const void *pv, u32 pvlen, const void *dvsr, u32 dvs
 /*
  * same as ethernet FSC calculation algorithm.
  * e.g. FCS of:
- * FF FF FF FF FF FF 00 00 00 00 00 4A 00 00 00 00 
- * 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
- * 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
- * 00 00 00 00 00 00 00 00 00 00 00 00 
+ * FF FF FF FF FF FF 00 00 00 00 00 4A 00 00 00 00
+ * 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+ * 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+ * 00 00 00 00 00 00 00 00 00 00 00 00
  * is 51 DA 8A 29
- * 
+ *
  */
 u32 cpkl_alg_crc32(const void *pv, u32 size)
 {
@@ -250,7 +250,7 @@ u64 cpkl_alg_crc64(const void *pv, u32 size)
 	cpkl_alg_getrmd(src, size + 8, _cpkl_dvsr, sizeof(_cpkl_dvsr), (u8 *)&rst);
 
 	cpkl_free(src);
-	
+
 	return rst;
 }
 
@@ -266,7 +266,7 @@ u64 cpkl_alg_crc64ck(const void *pv, u32 size)
 
 	if (rst == 0)
 		return 1;
-	
+
 	return 0;
 }
 
@@ -383,7 +383,7 @@ int cpkl_stdiv
 					CPKL_ASSERT(0);
 				}
 
-				goto cpkl_stdiv_nextch;				
+				goto cpkl_stdiv_nextch;
 			}
 		}
 
@@ -394,7 +394,7 @@ int cpkl_stdiv
 		case 2:
 			if (ret == n_argv)
 				return ret;
-			
+
 			argv[ret] = &(buf[i]);
 			len[ret] = 1;
 			ret++;
@@ -410,7 +410,7 @@ int cpkl_stdiv
 		}
 
 cpkl_stdiv_nextch:
-		
+
         i++;
 	}
 
@@ -431,27 +431,71 @@ void cpkl_bswap(void *p, u32 size)
 	}
 }
 
-void cpkl_hexdump(void *buf, u32 len)
+void cpkl_hexdump(void *buf, u32 len, char *prefix)
 {
 #define CPKL_HEXDUMP_LINEWIDTH			(16)
 	u8 *p = (u8 *)buf;
 	u32 i;
 
-	cpkl_printf("       ");
+	cpkl_printf("\n%s"
+				"       ",
+				prefix);
 	for (i = 0; i < CPKL_HEXDUMP_LINEWIDTH; i++)
-		cpkl_printf("%02x ", i);
-	cpkl_printf("\n");
-	
+	{
+		if ((i % 4) == 0)
+			cpkl_printf("%02x ", i);
+		else
+			cpkl_printf("   ");
+	}
+
 	for (i = 0; i < len; i++)
 	{
 		if ((i % CPKL_HEXDUMP_LINEWIDTH) == 0)
-			cpkl_printf("0x%03X: ", i);
+			cpkl_printf("\n%s"
+						"0x%03X: ",
+						prefix,
+						i);
 		cpkl_printf("%02X ", *p++);
-		if (((i % CPKL_HEXDUMP_LINEWIDTH) == (CPKL_HEXDUMP_LINEWIDTH - 1)) ||
-			((i + 1) == len))
-			cpkl_printf("\n");
 	}
 }
+
+CODE_SECTION("====================")
+CODE_SECTION("print with time stamp")
+CODE_SECTION("====================")
+#ifdef CPKL_CONFIG_PRINT_TMSTAMP
+int cpkl_printf(const char *fmt, ...)
+{
+	static cpkl_custmtx_t lock;
+	static u32 initdone = 0;
+	va_list args;
+	char *tmpbuf;
+	int len, i;
+
+	if (initdone == 0)
+	{
+		cpkl_mtxcreate(&lock);
+		initdone = 1;
+	}
+
+	tmpbuf = (char *)cpkl_malloc(64 * 1024);
+
+	va_start(args, fmt);
+	len = vsnprintf(tmpbuf, 64 * 1024, fmt, args);
+	va_end(args);
+
+	cpkl_mtxlock(&lock);
+	for (i = 0; i < len; i++)
+	{
+		cpkl_pdf_printf("%c", tmpbuf[i]);
+		if (tmpbuf[i] == '\n')
+			cpkl_pdf_printf("[%010lld.%06lld]:", cpkl_tmsstamp() / 1000000, cpkl_tmsstamp() % 1000000);
+	}
+	cpkl_mtxunlock(&lock);
+
+	cpkl_free(tmpbuf);
+	return 0;
+}
+#endif
 
 CODE_SECTION("====================")
 CODE_SECTION("Time statistic")
@@ -508,10 +552,10 @@ static void cpkl_tmsrepone(int tmsidx)
 	if (_cpkl_tmsar[tmsidx].swch)
 	{
 		cpkl_tms(tmsidx, CPKL_TMS_OFF);
-		cpkl_printf("tms %2d just take off.\n", tmsidx);
+		cpkl_printf("\ntms %2d just take off.", tmsidx);
 	}
 
-	cpkl_pdf_sprintf(fmtstr, 128, "\"%%%ds\" tms[%%2d] : %%10llu(us)\n", CPKL_TMSCOMMLEN);
+	cpkl_pdf_sprintf(fmtstr, 128, "\n\"%%%ds\" tms[%%2d] : %%10llu(us)", CPKL_TMSCOMMLEN);
     cpkl_printf(fmtstr,
 				_cpkl_tmsar[tmsidx].comm,
 				tmsidx,
@@ -524,7 +568,7 @@ void cpkl_tms(int tmsidx, int swch)
 
 	if (_cpkl_tmsar[tmsidx].hasinit == 0)
 	{
-		cpkl_printf("tms %2d need to reset first.\n", tmsidx);
+		cpkl_printf("\ntms %2d need to reset first.", tmsidx);
 		return;
 	}
 
@@ -544,7 +588,7 @@ void cpkl_tms(int tmsidx, int swch)
 	}
 	else
 	{
-		cpkl_printf("Timer Err. switch:%d\n", swch);
+		cpkl_printf("\nTimer Err. switch:%d", swch);
 	}
 }
 
@@ -570,7 +614,7 @@ void cpkl_tmsreset(int tmsidx, char *comm)
 void cpkl_tmreport(int tmsidx)
 {
 	CPKL_ASSERT(tmsidx < CPKL_CONFIG_TMSNUM);
-	
+
 	if (tmsidx == CPKL_TMSREPORTALL)
 	{
 		int i;
@@ -650,7 +694,7 @@ u32 *cpkl_ri_rdgen(u32 *distri, u32 n_distri)
 	{
 		r = cpkl_ri_rand(0, total - i);
 		sum = 0;
-		
+
 		for (j = 0; j < n_distri; j++)
 		{
 			sum += curdis[j];
@@ -671,11 +715,11 @@ u32 *cpkl_ri_rdgen(u32 *distri, u32 n_distri)
 void cpkl_ri_test(void)
 {
 	u32 *ret, tmp[16] = {3, 1, 2, 2};
-	
+
 	cpkl_ri_seed();
 	ret = cpkl_ri_rdgen(tmp, 4);
 	cpkl_free(ret);
-	
+
 }
 #endif
 
@@ -693,7 +737,7 @@ int _cpkl_sigcreate(cpkl_custsig_t *sig, u32 initsig, u32 maxsig, char *filename
 	int ret = 0;
 
 	sig->maxsig = maxsig;
-	
+
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
 	sig->sig = CreateSemaphore(NULL, initsig, maxsig, NULL);
 	if (sig->sig == 0)
@@ -703,8 +747,8 @@ int _cpkl_sigcreate(cpkl_custsig_t *sig, u32 initsig, u32 maxsig, char *filename
 	{
 		ret = -1;
 #ifdef CPKL_CONFIG_DEBUG
-		cpkl_printf("sem_init() faild, errno : %d\n"
-					"file: %s, func: %s, line: %d\n",
+		cpkl_printf("\nsem_init() faild, errno : %d"
+					"\nfile: %s, func: %s, line: %d",
 					errno,
 					filename, funcname, line);
 #endif
@@ -738,9 +782,9 @@ void _cpkl_sigdsty(cpkl_custsig_t *sig, char *filename, const char *funcname, u3
 
 #ifdef CPKL_CONFIG_DEBUG
 	/* tmstat */
-	cpkl_printf("hsp_sigdsty(), func: %s, line: %d, "
+	cpkl_printf("\nhsp_sigdsty(), func: %s, line: %d, "
 				"sum: %lld(us), "
-				"times: %lld\n",
+				"times: %lld",
 				funcname, line,
 				sig->tmsum,
 				sig->times);
@@ -756,8 +800,8 @@ void _cpkl_sigsend(cpkl_custsig_t *sig, char *filename, const char *funcname, u3
 	if (sem_post(&(sig->u_sem)) == -1)
 	{
 #ifdef CPKL_CONFIG_DEBUG
-		cpkl_printf("semaphore up operate failed. error:%d\n"
-					"file: %s, func: %s, line: %d\n",
+		cpkl_printf("\nsemaphore up operate failed. error:%d"
+					"\nfile: %s, func: %s, line: %d",
 					errno,
 					filename, funcname, line);
 #endif
@@ -784,8 +828,8 @@ int _cpkl_sigwait(cpkl_custsig_t *sig, const char *filename, const char *funcnam
 	if (sem_wait(&(sig->u_sem)) == -1)
 	{
 #ifdef CPKL_CONFIG_DEBUG
-		cpkl_printf("semaphore down operate failed. error:%d\n"
-					"file: %s, func: %s, line: %d\n",
+		cpkl_printf("\nsemaphore down operate failed. error:%d"
+					"\nfile: %s, func: %s, line: %d",
 					errno,
 					filename, funcname, line);
 #endif
@@ -825,8 +869,8 @@ int _cpkl_mtxcreate(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u
 	if (pthread_mutex_init(&(mtx->mtx), NULL) != 0)
 	{
 		ret = -1;
-		cpkl_printf("pthread_mutex_init() faild, errno : %d\n"
-					"file: %s, func: %s, line: %d\n",
+		cpkl_printf("\npthread_mutex_init() faild, errno : %d"
+					"\nfile: %s, func: %s, line: %d",
 					errno,
 					filename, funcname, line);
 	}
@@ -855,9 +899,9 @@ void _cpkl_mtxdsty(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u3
 
 #ifdef CPKL_CONFIG_DEBUG
 	/* tmstat */
-	cpkl_printf("cpkl_mtxdsty(), func: %s, line: %d, "
+	cpkl_printf("\ncpkl_mtxdsty(), func: %s, line: %d, "
 				"sum: %lld(us), "
-				"times: %lld\n",
+				"times: %lld",
 				funcname, line,
 				mtx->tmsum,
 				mtx->times);
@@ -883,8 +927,8 @@ int _cpkl_mtxlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, u32
 	{
 		ret = -1;
 #ifdef CPKL_CONFIG_DEBUG
-		cpkl_printf("mutex lock operate failed. error:%d\n"
-					"file: %s, func: %s, line: %d\n",
+		cpkl_printf("\nmutex lock operate failed. error:%d"
+					"\nfile: %s, func: %s, line: %d",
 					errno,
 					filename, funcname, line);
 #endif
@@ -939,8 +983,8 @@ void _cpkl_mtxunlock(cpkl_custmtx_t *mtx, char *filename, const char *funcname, 
 	if (pthread_mutex_unlock(&(mtx->mtx)) != 0)
 	{
 #ifdef CPKL_CONFIG_DEBUG
-		cpkl_printf("mutex unlock operate failed. error:%d\n"
-					"file: %s, func: %s, line: %d\n",
+		cpkl_printf("\nmutex unlock operate failed. error:%d"
+					"\nfile: %s, func: %s, line: %d",
 					errno,
 					filename, funcname, line);
 #endif
@@ -970,12 +1014,12 @@ static int cpkl_avl_inbf(cpkl_avln_t *node)
 
 	u32 lch = (node->lc != NULL) ? (node->lc->subth) : 0;
 	u32 rch = (node->rc != NULL) ? (node->rc->subth) : 0;
-	
+
 	return (lch - rch);
 }
 
 /*
- * refrash subtree height
+ * refresh subtree height
  * return : 1, need to reballance
  *			0, no need
  */
@@ -1056,7 +1100,7 @@ static void cpkl_avl_ab(cpkl_avln_t **root, cpkl_avln_t *cn)
 	/* if we insert the root node, no need to change anything either */
 	while (wln)
 	{
-		/* refrash the father node's heigth */
+		/* refresh the father node's heigth */
 		if (cpkl_avl_rfh(wln) == 0)
 		{
 			break;
@@ -1134,7 +1178,7 @@ static void cpkl_avl_ndcut(cpkl_avln_t **root, cpkl_avln_t *rmnode)
 	}
 
 	*root = nc;
-	
+
 }
 
 /*
@@ -1191,13 +1235,13 @@ void cpkl_bst_remove(cpkl_bstn_t **root, cpkl_bstn_t *rmnode)
 	if ((rmnode->lc != NULL) && (rmnode->rc != NULL))
 	{
 		cpkl_bstn_t *rmpos;
-	
+
 		/* find the position, substitude the 'rmnode' with the info in rmpos
 		 * and cut the rmpos
 		 */
 		if (rmnode->lc->subth > rmnode->rc->subth)
 		{
-			/* find the most right child node 
+			/* find the most right child node
 			   in the left subtree */
 			rmpos = rmnode->lc;
 			while (rmpos->rc != NULL)
@@ -1205,7 +1249,7 @@ void cpkl_bst_remove(cpkl_bstn_t **root, cpkl_bstn_t *rmnode)
 		}
 		else
 		{
-			/* find the most left child node 
+			/* find the most left child node
 			   in the right subtree */
 			rmpos = rmnode->rc;
 			while (rmpos->lc != NULL)
@@ -1254,7 +1298,7 @@ void cpkl_bst_remove(cpkl_bstn_t **root, cpkl_bstn_t *rmnode)
 	else
 	{
 		rbpos = rmnode->f;
-		
+
 		/* now we just cut the rmnode directly */
 		cpkl_avl_ndcut(root, rmnode);
 	}
@@ -1421,7 +1465,7 @@ static int cpkl_avlhc(cpkl_avln_t *root)
 	{
 		lh = 0;
 	}
-	
+
 	if (root->rc)
 	{
 		if (cpkl_avlhc(root->rc))
@@ -1466,7 +1510,7 @@ static int cpkl_avlbc(cpkl_avln_t *root)
 	{
 		lh = 0;
 	}
-	
+
 	if (root->rc)
 	{
 		if (cpkl_avlbc(root->rc))
@@ -1500,14 +1544,14 @@ static int cpkl_avldrc(cpkl_avln_t *root, cpkl_bstncmp cmpf)
 	{
 		if (root->lc->f != root)
 		{
-			cpkl_printf("root->lc->f != root\n");
+			cpkl_printf("\nroot->lc->f != root");
 			goto cpkl_avldrc_faild;
 		}
-	
+
 		if (!((cmpf(root->lc, root) == CPKL_BSTCMP_1LT2) ||
 			  (cmpf(root->lc, root) == CPKL_BSTCMP_1EQ2)))
 		{
-			cpkl_printf("(!(cmpf(root->lc, root) < 0))\n");
+			cpkl_printf("\n(!(cmpf(root->lc, root) < 0))");
 			goto cpkl_avldrc_faild;
 		}
 
@@ -1516,19 +1560,19 @@ static int cpkl_avldrc(cpkl_avln_t *root, cpkl_bstncmp cmpf)
 			goto cpkl_avldrc_faild;
 		}
 	}
-	
+
 	if (root->rc)
 	{
 		if (root->rc->f != root)
 		{
-			cpkl_printf("root->rc->f != root\n");
+			cpkl_printf("\nroot->rc->f != root");
 			goto cpkl_avldrc_faild;
 		}
-	
+
 		if (!((cmpf(root->rc, root) == CPKL_BSTCMP_1BT2) ||
 			  (cmpf(root->rc, root) == CPKL_BSTCMP_1EQ2)))
 		{
-			cpkl_printf("(!(cmpf(root->rc, root) > 0))");
+			cpkl_printf("\n(!(cmpf(root->rc, root) > 0))");
 			goto cpkl_avldrc_faild;
 		}
 
@@ -1614,7 +1658,7 @@ void cpkl_bsttest(void)
 	}
 	for (i = 0; i < testtimes; i++)
 		src[i] = 1;
-		
+
 	dist = cpkl_ri_rdgen(src, testtimes);
 	if (dist == NULL)
 	{
@@ -1627,7 +1671,7 @@ void cpkl_bsttest(void)
 		tmp = dist[i];
 		bstar[i].val = tmp << 4;
 	}
-	
+
 	/* insert */
 	cpkl_tmsreset(0, "bst test insert");
 	cpkl_tms(0, CPKL_TMS_ON);
@@ -1691,7 +1735,7 @@ static u32				cpkl_mmstatinit = 0;
 /* this is the memory monitor BST root */
 static cpkl_bstn_t		*cpkl_mmroot = NULL;
 
-/* in the multi thread env, we need to protect the hsp_malloc and hsp_free */
+/* in the multi thread env, we need to protect the cpkl_malloc and cpkl_free */
 static cpkl_custmtx_t	cpkl_mmlocker;
 
 /* memory statinfo */
@@ -1715,7 +1759,7 @@ static int cpkl_mmchkwalk(cpkl_bstn_t *n1, void *param)
 {
 	cpkl_mmblkinf_t *p1 = CPKL_GETCONTAINER(n1, cpkl_mmblkinf_t, bstn);
 
-	cpkl_printf("file: %s, function: %s, line: %d, size: %d, occupy: %d\n",
+	cpkl_printf("\nfile: %s, function: %s, line: %d, size: %d, occupy: %d",
 				p1->filename, p1->funcname, p1->line,
 				p1->s_real, p1->s_occupy);
 
@@ -1776,7 +1820,7 @@ void *_cpkl_malloc
 	p->line = line;
 	p->s_real = size;
 	p->s_occupy = occupy;
-	
+
 	p++;
 
 	/* init to zero */
@@ -1807,7 +1851,7 @@ void _cpkl_free
 	dstbst = cpkl_bst_lkup(cpkl_mmroot, &(_p->bstn), cpkl_mmrgcmp);
 	if (dstbst == NULL)
 	{
-	    cpkl_printf("hsp_free() double free fault, file: %s, function: %s, line: %d.\n",
+	    cpkl_printf("\ncpkl_free() double free fault, file: %s, function: %s, line: %d.",
 				    filename, funcname, line);
 	    return;
 	}
@@ -1834,11 +1878,11 @@ void cpkl_mmcheck(void)
 	if (cpkl_mmroot == NULL)
 	{
 		CPKL_ASSERT((cpkl_mmstat.real == 0) && (cpkl_mmstat.occupy == 0));
-		cpkl_printf("No memory leak existed.\n");
+		cpkl_printf("\nNo memory leak existed.");
 	}
 	else
 	{
-		cpkl_printf("Memory leak detected : %lldM\t%lldK\t%lldB\n",
+		cpkl_printf("\nMemory leak detected : %lldM\t%lldK\t%lldB",
 					cpkl_mmstat.real >> 20,
 					(cpkl_mmstat.real >> 10) & ((0x1 << 10) - 1),
 					cpkl_mmstat.real & ((0x1 << 10) - 1));
@@ -1847,9 +1891,9 @@ void cpkl_mmcheck(void)
 		CPKL_ASSERT(cpkl_bst_walk(cpkl_mmroot, CPKL_BSTWALKTYPE_LMR, cpkl_mmchkwalk, NULL) == 0);
 	}
 
-	cpkl_printf("Max memory allocate file: %s  function: %s  line: %d\n"
-				"Max memory space   used: %lldM\t%lldK\n"
-				"Max memory space occupy: %lldM\t%lldK\n",
+	cpkl_printf("\nMax memory allocate file: %s  function: %s  line: %d"
+				"\nMax memory space   used: %lldM\t%lldK"
+				"\nMax memory space occupy: %lldM\t%lldK",
 				cpkl_mmstat.max_filename, cpkl_mmstat.max_funcname, cpkl_mmstat.max_line,
 				cpkl_mmstat.real_max >> 20, (cpkl_mmstat.real_max >> 10) & ((0x1 << 10) - 1),
 				cpkl_mmstat.occupy_max >> 20, (cpkl_mmstat.occupy_max >> 10) & ((0x1 << 10) - 1));
@@ -1857,7 +1901,7 @@ void cpkl_mmcheck(void)
 	cpkl_mtxunlock(&cpkl_mmlocker);
 #ifdef CPKL_CONFIG_DEBUG
 	/* tmstat */
-	cpkl_printf("cpkl_mmcheck(), sigblocktime: %lld(us), times: %lld\n",
+	cpkl_printf("\ncpkl_mmcheck(), sigblocktime: %lld(us), times: %lld",
 				cpkl_mmlocker.tmsum, cpkl_mmlocker.times);
 #endif
 
@@ -1909,7 +1953,7 @@ static u32 cpkl_shgetfreeidx(cpkl_sh_t *sh)
 	{
 		CPKL_ASSERT(map[p->shs_idx] == 0);
 		map[p->shs_idx] = 1;
-	}	
+	}
 
 	for (i = 0; i < n_shs; i++)
 	{
@@ -1996,7 +2040,7 @@ CPKL_FCTNEW_DEFINE(cpkl_sh_t)
 
 
 	/* object functions */
-	
+
 	/* input parameters */
 	newsh->s_blk 	= (fcp->s_blk + sizeof(cpkl_nfblock_t) - 1) & (~(sizeof(cpkl_nfblock_t) - 1));
 	newsh->s_slb 	= fcp->s_slb;
@@ -2042,7 +2086,7 @@ CPKL_FCTDEL_DEFINE(cpkl_sh_t)
 	cpkl_shs_t *p, *n;
 	/* free all slabs */
 	CPKL_LISTENTRYWALK_SAVE(p, n, cpkl_shs_t, &(sh->afh), curslb)		/* all free list */
-	{	
+	{
 		cpkl_free(p);
 	}
 	CPKL_LISTENTRYWALK_SAVE(p, n, cpkl_shs_t, &(sh->hfh), curslb)		/* half free list */
@@ -2194,7 +2238,7 @@ void cpkl_shfree(cpkl_sh_t *sh, void *blk)
 		(sh->n_nfs)--;
 		(sh->n_hfs)++;
 	}
-	
+
 	(dstshs->n_fblk)++;
 
 	/*
@@ -2227,7 +2271,7 @@ void cpkl_shreset(cpkl_sh_t *sh)
 {
 	cpkl_listhead_t *p, *n;
 	cpkl_shs_t *shs;
-	
+
 	CPKL_LISTWALK_SAVE(p, n, &(sh->hfh))		/* half free */
 	{
 		shs = CPKL_GETCONTAINER(p, cpkl_shs_t, curslb);
@@ -2251,7 +2295,7 @@ void cpkl_shreset(cpkl_sh_t *sh)
 	CPKL_LISTWALK_SAVE(p, n, &(sh->nfh))		/* no free */
 	{
 		shs = CPKL_GETCONTAINER(p, cpkl_shs_t, curslb);
-		
+
 		cpkl_listdel(p);
 
 		/* reset this slab */
@@ -2288,7 +2332,7 @@ void cpkl_shdrainslb(cpkl_sh_t *sh)
 	}
 
 	CPKL_LISTENTRYWALK_SAVE(p, n, cpkl_shs_t, &(sh->afh), curslb)		/* all free list */
-	{	
+	{
 		cpkl_free(p);
 	}
 	cpkl_initlisthead(&(sh->afh));
@@ -2432,9 +2476,9 @@ void cpkl_shtest(void)
 		CPKL_SHTEST_SBLK,
 		CPKL_SHTEST_1M,
 		0
-	};	
+	};
 	testsh = CPKL_FCTNEW(cpkl_sh_t, &fcp);
-	
+
 	cpkl_pdf_memset(shtestbuf, 0, CPKL_SHTEST_NBLK * sizeof(shtestbuf[0]));
 
     int sign = -1;
@@ -2474,8 +2518,8 @@ void cpkl_shtest(void)
 
 			cpkl_mmstat_t mmstat;
 			cpkl_mmgetstat(&mmstat);
-			
-			cpkl_printf("thr:0x%4x, totalmem: %lldM\t%lldK   ""cur hf:%3d nf:%3d\n",
+
+			cpkl_printf("\nthr:0x%4x, totalmem: %lldM\t%lldK   ""cur hf:%3d nf:%3d",
 						thr, (mmstat.real) >> 20, ((mmstat.real) >> 10) & ((0x1 << 10) - 1),
 						testsh->n_hfs, testsh->n_nfs);
 
@@ -2505,7 +2549,7 @@ CODE_SECTION("====================")
 static cpkl_sss_t *hsp_ssns(cpkl_ss_t *ss)
 {
 	cpkl_sss_t *sss;
-	
+
     sss = (cpkl_sss_t *)cpkl_malloc(ss->s_slb);
 	if (sss == 0)
 	{
@@ -2521,7 +2565,7 @@ static cpkl_sss_t *hsp_ssns(cpkl_ss_t *ss)
 	cpkl_listadd_tail(&(sss->curslb), &(ss->list));
 	/* ok, the sh's curslab is this new slab */
 	ss->freeslb = &(sss->curslb);
-			
+
 	return sss;
 }
 
@@ -2541,7 +2585,7 @@ CPKL_FCTNEW_DEFINE(cpkl_ss_t)
 		return NULL;
 
 	/* object functions */
-	
+
 	/* input parameters */
 	newss->s_blk	= fcp->s_blk;
 	newss->s_slb	= fcp->s_slb;
@@ -2557,7 +2601,7 @@ CPKL_FCTNEW_DEFINE(cpkl_ss_t)
 	newss->maxslb	= 0;
 	newss->maxblk	= 0;
 #endif
-	
+
 	if (newss->needsig)
 	{
 		if (cpkl_sigcreate(&(newss->sig), 1, 1) != 0)
@@ -2641,7 +2685,7 @@ void *cpkl_ssalloc(cpkl_ss_t *ss)
                 vs->freepos	= (void *)((sz_t)(vs->freepos) - ss->s_blk);
 				(vs->n_blk)--;
                 (ss->n_blk)--;
-				
+
 				ret = NULL;
 				goto cpkl_shalloc_ret;
 			}
@@ -2690,16 +2734,16 @@ void cpkl_ssfree(cpkl_ss_t *ss, u32 n_blk)
 			ss->freeslb	= ss->freeslb->prev;
 			continue;
 		}
-		
+
 		if (vs->n_blk < n_blk)
             curfreecount = vs->n_blk;
 		else
 			curfreecount = n_blk;
-		
+
 		vs->freepos = (void *)((sz_t)(vs->freepos) - curfreecount * ss->s_blk);
 		vs->n_blk -= curfreecount;
         ss->n_blk -= curfreecount;
-		
+
 		n_blk -= curfreecount;
 	}
 
@@ -2732,7 +2776,7 @@ CPKL_FCTNEW_DEFINE(cpkl_hl_t)
 		return NULL;
 
 	/* object functions */
-	
+
 	/* input parameters */
 	newhl->keylen	= fcp->keylen;
 	newhl->rstlen	= fcp->rstlen;
@@ -2740,7 +2784,7 @@ CPKL_FCTNEW_DEFINE(cpkl_hl_t)
 
 	/* default parameters */
 	cpkl_initlisthead(&(newhl->glh));
-	
+
 #ifdef CPKL_CONFIG_HL_USESH
 {
 	cpkl_shfcp_t shfcp	= {sizeof(cpkl_hlnd_t) - 1 + fcp->keylen + fcp->rstlen,
@@ -2779,7 +2823,7 @@ CPKL_FCTDEL_DEFINE(cpkl_hl_t)
 #ifdef CPKL_CONFIG_HL_USESH
 	CPKL_FCTDEL(cpkl_sh_t, hl->hlndsh);
 #endif
-	
+
     cpkl_free(hl);
 }
 
@@ -2893,7 +2937,7 @@ void cpkl_hlremove(cpkl_hl_t *hl, const void *key)
 	{
 		/* remove from global list */
 		cpkl_listdel(&(curnode->gl));
-	
+
 		cpkl_listdel(&(curnode->listnode));
 #ifdef CPKL_CONFIG_HL_USESH
 		cpkl_shfree(hl->hlndsh, curnode);
@@ -2907,7 +2951,7 @@ void cpkl_hlremove(cpkl_hl_t *hl, const void *key)
 #ifdef CPKL_CONFIG_DEBUG
 	else
 	{
-		cpkl_printf("hashlist remove, entry NOT exist.\n");
+		cpkl_printf("\nhashlist remove, entry NOT exist.");
 	}
 #endif
 }
@@ -3028,7 +3072,7 @@ CPKL_FCTNEW_DEFINE(cpkl_rrmgnr_t)
 		return NULL;
 
 	/* object functions */
-	
+
 	/* input parameters */
 	newrrmngr->begin = fcp->begin;
 	newrrmngr->total = newrrmngr->left = fcp->total;
@@ -3099,7 +3143,7 @@ int cpkl_rroccupy(cpkl_rrmgnr_t *rrmgnr, u64 begin, u64 size)
 		 * or the BST can't inset that rrblock successful
 		 */
 		p->sz = begin - p->begin;
-	
+
 		if ((begin + size) < oldend)
 		{
 			/* we need to insert new rrblock */
@@ -3108,7 +3152,7 @@ int cpkl_rroccupy(cpkl_rrmgnr_t *rrmgnr, u64 begin, u64 size)
 			{
 				/* we have to rollback */
 				p->sz = oldend - p->begin;
-				
+
 				return -2;
 			}
 
@@ -3237,8 +3281,8 @@ char *cpkl_fgets(char *s, int size, CPKL_FILE *fdesc)
 	} while (src[fdesc->curpos++] != 0x0a);
 
 	*dst++ = 0;
-	
-	return s;	
+
+	return s;
 }
 
 #endif
@@ -3378,13 +3422,13 @@ static cpkl_cpctx_t* cpkl_cpstop_body(cpkl_cpctx_t *ctx, u8 c, u32 *op)
 			ret->curcpent->start(ret->up);
 
 		retop |= CPKP_CPCTXOP_SHIFTF;
-		
+
 		break;
 	}
 	case '}':
 	{
 		/* body end, call the registed parse function */
-		if (ret->curcpent->parse)		
+		if (ret->curcpent->parse)
 			ctx->curcpent->parse(&(ctx->dstbuf[1]),		/* skip the first char '{' */
 								 ctx->n_char - 1,
 								 ctx->up);
@@ -3394,7 +3438,7 @@ static cpkl_cpctx_t* cpkl_cpstop_body(cpkl_cpctx_t *ctx, u8 c, u32 *op)
 
 		if (cpkl_pdf_strlen(ctx->curcpent->tag) == 0)
 			retop |= CPKP_CPCTXOP_CTXCAT;
-		
+
 		break;
 	}
 	default:
@@ -3443,7 +3487,7 @@ static cpkl_cpctx_t* cpkl_cpstop_pa(cpkl_cpctx_t *ctx, u8 c, u32 *op)
 		 * we need to copy them back to the parent context
 		 */
 		retop |= CPKP_CPCTXOP_SHIFTB | CPKP_CPCTXOP_CTXCAT | CPKP_CPCTXOP_CTXFREE;
-		
+
 		break;
 	}
 	}
@@ -3581,7 +3625,7 @@ CPKL_FCTNEW_DEFINE(cpkl_cpctx_t)
 		return NULL;
 
 	/* object functions */
-	
+
 	/* input parameters */
 	newctx->bufsize		= fcp->bufsize;
 	newctx->parent		= fcp->parent;
@@ -3700,7 +3744,7 @@ static int cpkl_cp_parse(cpkl_cp_t *cp, u8 *src, u32 len, void *p)
 
 			cp->bufcat(cp, newctx, ctx);
 		}
-		
+
 		if (op & CPKP_CPCTXOP_CTXFREE)
 		{
 			CPKL_FCTDEL(cpkl_cpctx_t, newctx);
@@ -3728,7 +3772,7 @@ cpkl_cp_parse_ret:
 }
 
 /*
- * return: number of copy bytes 
+ * return: number of copy bytes
  */
 static int cpkl_cp_bufcat(cpkl_cp_t *cp, cpkl_cpctx_t *ctxfrom, cpkl_cpctx_t *ctxto)
 {
@@ -3762,7 +3806,7 @@ CPKL_FCTNEW_DEFINE(cpkl_cp_t)
 	newcp->addcpent		= cpkl_cp_addcpent;
 	newcp->parse		= cpkl_cp_parse;
 	newcp->bufcat		= cpkl_cp_bufcat;
-	
+
 	/* input parameters */
 
 
@@ -3816,7 +3860,7 @@ CODE_SECTION("====================")
 #ifdef CPKL_CONFIG_THREADPOLL
 
 /* just only one instance */
-cpkl_threadpool_t unique_tp;
+cpkl_threadpool_t unique_tp = {{{{0}}}, 0};
 
 /* the hsp_tppubent() is the entry function of all the thread in the thread pool. */
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
@@ -3871,7 +3915,7 @@ static int cpkl_tppubent(void *param)
 	}
 
 	cpkl_sigsend(&(tpslot->teminalsig));
-	
+
 	return 0;
 }
 
@@ -3898,7 +3942,7 @@ int cpkl_tpstart(u32 n_thread)
 #ifdef CPKL_CONFIG_DEBUG
 		unique_tp.tpslotlist[i].slotidx = i;
 #endif
-	
+
 		/* create all work thread in the thread pool
 		 * the thread create functions is platform dependent
 		 */
@@ -3907,14 +3951,16 @@ int cpkl_tpstart(u32 n_thread)
 		/* no need to maintain the handle, just close it */
 		CloseHandle(htmp);
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
-		pthread_create(&(unique_tp.thdesc[i]), NULL, cpkl_tppubent, (void *)(unsigned long)i);
+		pthread_create(&(unique_tp.thdesc[i]), NULL, cpkl_tppubent, (void *)(sz_t)i);
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 		unique_tp.thdesc[i] = kthread_create(cpkl_tppubent, (void *)(unsigned long)i, "cpkl_threadpool-%d", i);
 		cgroup_kernel_attach_path("./", unique_tp.thdesc[i]);
 		wake_up_process(unique_tp.thdesc[i]);
 #endif
 	}
-	
+
+	unique_tp.init_flag = 1;
+
 	return 0;
 }
 
@@ -3922,6 +3968,12 @@ int cpkl_tpstart(u32 n_thread)
 void cpkl_tpstop(void)
 {
 	u32 i;
+
+	if (unique_tp.init_flag == 0)
+	{
+		cpkl_printf("\nthread pool NOT init.");
+		return;
+	}
 
 	for (i = 0; i < unique_tp.n_tpslot; i++)
 	{
@@ -3943,6 +3995,12 @@ void cpkl_tpstop(void)
 
 int cpkl_tpinsert(cpkl_tpentry entry, void *param, cpkl_custsig_t *tersig)
 {
+	if (unique_tp.init_flag == 0)
+	{
+		cpkl_printf("\nthread pool NOT init.");
+		return -1;
+	}
+
 	static unsigned i = 0;
 	cpkl_tpslot_t *dstslot = &(unique_tp.tpslotlist[0]);
 	cpkl_tpblktsk_t *newtsk = (cpkl_tpblktsk_t *)cpkl_malloc(sizeof(cpkl_tpblktsk_t));
@@ -3950,11 +4008,11 @@ int cpkl_tpinsert(cpkl_tpentry entry, void *param, cpkl_custsig_t *tersig)
 	newtsk->entry = entry;
 	newtsk->param = param;
 	newtsk->ternsig = tersig;
-	
+
 	/* find ths slot with the most less blocked tasks */
 	dstslot = &(unique_tp.tpslotlist[i]);
 	i = (i + 1) % unique_tp.n_tpslot;
- 
+
 	/* let's insert this new block task */
 	/* lock the list */
 	cpkl_mtxlock(&(dstslot->listlock));
@@ -3967,7 +4025,7 @@ int cpkl_tpinsert(cpkl_tpentry entry, void *param, cpkl_custsig_t *tersig)
 
 	/* wake up the work thread */
 	cpkl_sigsend(&(dstslot->tskblksig));
-	
+
     return 0;
 }
 
@@ -3975,10 +4033,16 @@ int cpkl_tpinsert(cpkl_tpentry entry, void *param, cpkl_custsig_t *tersig)
 void cpkl_tpstat(void)
 {
 	u32 i;
-	cpkl_printf("thread pool stat: blk done\n");
+	if (unique_tp.init_flag == 0)
+	{
+		cpkl_printf("\nthread pool NOT init.");
+		return;
+	}
+
+	cpkl_printf("\nthread pool stat: blk done");
 	for (i = 0; i < unique_tp.n_tpslot; i++)
 	{
-		cpkl_printf("slot%2d : %s  %d   %d\n",
+		cpkl_printf("\nslot%2d : %s  %d   %d",
 					i,
 					unique_tp.tpslotlist[i].state == CPKL_TPSTATE_IDLE    ? "IDLE    " :
 					unique_tp.tpslotlist[i].state == CPKL_TPSTATE_RUNNING ? "RUNNING " :
@@ -4299,10 +4363,29 @@ static void CALLBACK cpkl_tmpubentry(UINT uTimerID, UINT uMsg, DWORD_PTR dwUser,
 	cpkl_tmpub();
 }
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+#ifdef CPKL_CONFIG_TMBYSELECT
+static void * cpkl_tmselect(void *param)
+{
+	struct timeval temp;
+
+	while (1)
+	{
+		temp.tv_sec = tmlk.pubintv / 1000;
+		temp.tv_usec = (tmlk.pubintv * 1000) % 1000000;
+
+		select(0, NULL, NULL, NULL, &temp);
+		cpkl_tmpub();
+	}
+
+	return NULL;
+}
+
+#else
 static void cpkl_tmpubentry(int sig)
 {
 	cpkl_tmpub();
 }
+#endif
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 
 #endif
@@ -4313,11 +4396,16 @@ static void cpkl_tmlkstart()
 	timeSetEvent(tmlk.pubintv, 1, cpkl_tmpubentry, NULL, TIME_PERIODIC);
 	// timeKillEvent();
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
+#ifdef CPKL_CONFIG_TMBYSELECT
+	pthread_t tmthread;
+	pthread_create(&tmthread, NULL, cpkl_tmselect, NULL);
+#else
 	signal(SIGALRM, cpkl_tmpubentry);
 	struct itimerval timer;
 	timer.it_value.tv_sec	= timer.it_interval.tv_sec	= tmlk.pubintv / 1000;
 	timer.it_value.tv_usec	= timer.it_interval.tv_usec	= (tmlk.pubintv * 1000) % 1000000;
 	setitimer(ITIMER_REAL, &timer, NULL);
+#endif
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 #endif
 
