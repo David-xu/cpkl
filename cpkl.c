@@ -600,7 +600,7 @@ void cpkl_tmsreset(int tmsidx, char *comm)
 
 	if (comm)
 	{
-		int cl = cpkl_pdf_strlen(comm);
+		sz_t cl = cpkl_pdf_strlen(comm);
 		if (cl >= CPKL_TMSCOMMLEN)
 		{
 			cl = CPKL_TMSCOMMLEN - 1;
@@ -1774,7 +1774,7 @@ static void cpkl_mminit(void)
 
 void *_cpkl_malloc
 (
-	sz_t size,
+	u32 size,
 	const char *filename,
 	const char *funcname,
 	u32 line
@@ -1784,7 +1784,7 @@ void *_cpkl_malloc
 		cpkl_mminit();
 
 	/*  */
-	sz_t occupy = 0x1;
+	u32 occupy = 0x1;
 	while (occupy < size)
 		occupy <<= 1;
 
@@ -2366,7 +2366,7 @@ u32 cpkl_shgetblkidx(cpkl_sh_t *sh, void *blk)
 	dstshs = CPKL_GETCONTAINER(dstshs, cpkl_shs_t, spbst);
 	retidx = dstshs->shs_idx * sh->bps;
 
-	retidx += ((sz_t)blk - (sz_t)(dstshs->rgl) - sizeof(cpkl_shs_t)) / sh->s_blk;
+	retidx += (u32)(((sz_t)blk - (sz_t)(dstshs->rgl) - sizeof(cpkl_shs_t)) / sh->s_blk);
 
 	return retidx;
 }

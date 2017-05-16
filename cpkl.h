@@ -6,7 +6,7 @@
 /*             This is the user config MACROs                                */
 
 #define CPKL_CONFIG_PLATFORM            CPKL_CONFIG_PLATFORM_WINDOWS
-#define CPKL_CONFIG_ALUWIDTH            CPKL_CONFIG_ALUWIDTH_32
+#define CPKL_CONFIG_ALUWIDTH            CPKL_CONFIG_ALUWIDTH_64
 #define CPKL_CONFIG_BSTTYPE             CPKL_CONFIG_BSTTYPE_AVL
 
 /* close the debug switch, it will run much more faster */
@@ -781,7 +781,7 @@ typedef struct _cpkl_mmstat {
 	u32		max_line;
 } cpkl_mmstat_t;
 
-void *_cpkl_malloc(sz_t size, const char *filename, const char *funcname, u32 line);
+void *_cpkl_malloc(u32 size, const char *filename, const char *funcname, u32 line);
 #define cpkl_malloc(size)		_cpkl_malloc((size), __FILE__, __FUNCTION__, __LINE__)
 
 void _cpkl_free(void *p, const char *filename, const char *funcname, u32 line);
