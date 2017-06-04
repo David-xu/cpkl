@@ -6,7 +6,6 @@
 /*             This is the user config MACROs                                */
 
 #define CPKL_CONFIG_PLATFORM            CPKL_CONFIG_PLATFORM_WINDOWS
-#define CPKL_CONFIG_ALUWIDTH            CPKL_CONFIG_ALUWIDTH_64
 #define CPKL_CONFIG_BSTTYPE             CPKL_CONFIG_BSTTYPE_AVL
 
 /* close the debug switch, it will run much more faster */
@@ -79,12 +78,16 @@
  */
 #if CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_WINDOWS
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <mswsock.h>
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #pragma comment (lib, "Winmm.lib")
+#pragma comment(lib, "ws2_32.lib")
 
 #define cpkl_pdf_malloc			malloc
 #define cpkl_pdf_free			free
@@ -212,16 +215,13 @@ typedef float					f32;
 typedef double					f64;
 #endif
 
-#if CPKL_CONFIG_ALUWIDTH == CPKL_CONFIG_ALUWIDTH_32
-typedef u32						sz_t;
-#elif CPKL_CONFIG_ALUWIDTH == CPKL_CONFIG_ALUWIDTH_64
-typedef u64						sz_t;
-#else
-#error "ALU operator width not support, check the MARCO 'CPKL_CONFIG_ALUWIDTH' definition."
-#endif
+#define CPKL_P2V(p)				((char *)(p) - (char *)0)
+#define CPKL_V2P(v)				((void *)((char *)0 + (v)))
 
 #define CPKL_ARRAY_SIZE(ar)		(sizeof(ar) / sizeof((ar)[0]))
 
+#define CPKL_ALIGN(l, align)	((((l) + (align) - 1) / (align)) * (align))
+#define CPKL_FIELDLEN(s, f)		(sizeof(((s *)(0))->f))
 /* some special value which CPKL used */
 #define	CPKL_INVALID_IDX		((u32)(-1))
 
@@ -321,7 +321,7 @@ CODE_SECTION("Double LinkList")
 CODE_SECTION("====================")
 
 #define	CPKL_GETCONTAINER(p, type, field)				\
-	((type *)(((sz_t)p) - ((sz_t)(&(((type *)0)->field)))))
+	((type *)CPKL_V2P(CPKL_P2V(p) - (CPKL_P2V(&(((type *)0)->field)))))
 
 typedef struct _cpkl_listhead {
 	struct _cpkl_listhead	*prev;

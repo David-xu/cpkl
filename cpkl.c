@@ -307,11 +307,11 @@ void *cpkl_alg_bsch(void *base, unsigned num, unsigned width, void *dst, int (*c
 	{
 		u32 idx_m = (idx_l + idx_r) / 2;
 
-		if (comp(dst, (void *)((sz_t)base + idx_m * width)) == 0)
+		if (comp(dst, CPKL_V2P(CPKL_P2V(base) + idx_m * width)) == 0)
 		{
-			return (void *)((sz_t)base + idx_m * width);
+			return CPKL_V2P(CPKL_P2V(base) + idx_m * width);
 		}
-		else if (comp(dst, (void *)((sz_t)base + idx_m * width)) < 0)
+		else if (comp(dst, CPKL_V2P(CPKL_P2V(base) + idx_m * width)) < 0)
 		{
 			idx_r = idx_m;
 		}
@@ -321,9 +321,9 @@ void *cpkl_alg_bsch(void *base, unsigned num, unsigned width, void *dst, int (*c
 		}
 	}
 
-    if (comp(dst, (void *)((sz_t)base + idx_l * width)) == 0)
+    if (comp(dst, CPKL_V2P(CPKL_P2V(base) + idx_l * width)) == 0)
     {
-        return (void *)((sz_t)base + idx_l * width);
+        return CPKL_V2P(CPKL_P2V(base) + idx_l * width);
     }
 
 	return NULL;
@@ -600,7 +600,7 @@ void cpkl_tmsreset(int tmsidx, char *comm)
 
 	if (comm)
 	{
-		sz_t cl = cpkl_pdf_strlen(comm);
+		u32 cl = (u32)cpkl_pdf_strlen(comm);
 		if (cl >= CPKL_TMSCOMMLEN)
 		{
 			cl = CPKL_TMSCOMMLEN - 1;
@@ -1747,9 +1747,9 @@ static int cpkl_mmrgcmp(cpkl_bstn_t *n1, cpkl_bstn_t *n2)
 	cpkl_mmblkinf_t *p1 = CPKL_GETCONTAINER(n1, cpkl_mmblkinf_t, bstn);
 	cpkl_mmblkinf_t *p2 = CPKL_GETCONTAINER(n2, cpkl_mmblkinf_t, bstn);
 
-	if ((sz_t)(p1) < (sz_t)(p2))
+	if (CPKL_P2V(p1) < CPKL_P2V(p2))
 		return CPKL_BSTCMP_1LT2;
-	else if ((sz_t)(p1) > (sz_t)(p2))
+	else if (CPKL_P2V(p1) > CPKL_P2V(p2))
 		return CPKL_BSTCMP_1BT2;
 	else
 		return CPKL_BSTCMP_1EQ2;
@@ -1979,17 +1979,17 @@ static void cpkl_shinitslab(cpkl_sh_t *sh, cpkl_shs_t *shs)
 
 	/* set the new slab's range */
 	shs->rgl = (void *)shs;
-	shs->rgr = (void *)((sz_t)shs + sh->s_slb);
+	shs->rgr = CPKL_V2P(CPKL_P2V(shs) + sh->s_slb);
 
 	/* init the free list */
 	fp = (cpkl_nfblock_t *)(shs + 1);
 	shs->freepos = NULL;
 	/* the first free block's next is NULL */
-	while (((sz_t)fp + sh->s_blk) <= (sz_t)(shs->rgr))
+	while ((CPKL_P2V(fp) + (int)(sh->s_blk)) <= CPKL_P2V(shs->rgr))
 	{
 		fp->next = shs->freepos;
 		shs->freepos = fp;
-		fp = (cpkl_nfblock_t *)((sz_t)fp + sh->s_blk);
+		fp = (cpkl_nfblock_t *)CPKL_V2P(CPKL_P2V(fp) + sh->s_blk);
 	}
 }
 
@@ -1999,18 +1999,18 @@ static int cpkl_shslbcmp(cpkl_bstn_t *n1, cpkl_bstn_t *n2)
 	cpkl_shs_t *shs1 = CPKL_GETCONTAINER(n1, cpkl_shs_t, spbst);
 	cpkl_shs_t *shs2 = CPKL_GETCONTAINER(n2, cpkl_shs_t, spbst);
 
-	if (((sz_t)shs1->rgr) <= ((sz_t)shs2->rgl))
+	if (CPKL_P2V(shs1->rgr) <= CPKL_P2V(shs2->rgl))
 		return CPKL_BSTCMP_1LT2;
-	else if (((sz_t)shs2->rgr) <= ((sz_t)shs1->rgl))
+	else if (CPKL_P2V(shs2->rgr) <= CPKL_P2V(shs1->rgl))
 		return CPKL_BSTCMP_1BT2;
-	else if ((((sz_t)shs1->rgl) == ((sz_t)shs2->rgl)) &&
-			 (((sz_t)shs1->rgr) == ((sz_t)shs2->rgr)))
+	else if ((CPKL_P2V(shs1->rgl) == CPKL_P2V(shs2->rgl)) &&
+			 (CPKL_P2V(shs1->rgr) == CPKL_P2V(shs2->rgr)))
 		return CPKL_BSTCMP_1EQ2;
-	else if ((((sz_t)shs1->rgl) >= ((sz_t)shs2->rgl)) &&
-			 (((sz_t)shs1->rgr) <= ((sz_t)shs2->rgr)))
+	else if ((CPKL_P2V(shs1->rgl) >= CPKL_P2V(shs2->rgl)) &&
+			 (CPKL_P2V(shs1->rgr) <= CPKL_P2V(shs2->rgr)))
 		return CPKL_BSTCMP_1IN2;
-	else if ((((sz_t)shs1->rgl) <= ((sz_t)shs2->rgl)) &&
-			 (((sz_t)shs1->rgr) >= ((sz_t)shs2->rgr)))
+	else if ((CPKL_P2V(shs1->rgl) <= CPKL_P2V(shs2->rgl)) &&
+			 (CPKL_P2V(shs1->rgr) >= CPKL_P2V(shs2->rgr)))
 		return CPKL_BSTCMP_2IN1;
 	else
 		return CPKL_BSTCMP_OVLP;
@@ -2204,7 +2204,7 @@ void cpkl_shfree(cpkl_sh_t *sh, void *blk)
 	cpkl_nfblock_t *fp = (cpkl_nfblock_t *)blk;
 	cpkl_shs_t lkupshs, *dstshs;
 	lkupshs.rgl = blk;
-	lkupshs.rgr = (void *)((sz_t)blk + sh->s_blk);
+	lkupshs.rgr = CPKL_V2P(CPKL_P2V(blk) + sh->s_blk);
 	/* find the blk's corrodinate slab by AVL, just save the result in dstshs */
 	dstshs = (cpkl_shs_t *)cpkl_bst_lkup(sh->slbtroot, &(lkupshs.spbst), cpkl_shslbcmp);
 	/* we can't find in AVL, the block is not alloced from this sh */
@@ -2355,7 +2355,7 @@ u32 cpkl_shgetblkidx(cpkl_sh_t *sh, void *blk)
 	/* this is the fake shs, just used to AVL lookup */
 	cpkl_shs_t lkupshs, *dstshs;
 	lkupshs.rgl = blk;
-	lkupshs.rgr = (void *)((sz_t)blk + sh->s_blk);
+	lkupshs.rgr = CPKL_V2P(CPKL_P2V(blk) + sh->s_blk);
 	/* locate the shs, find the blk's corrodinate slab by AVL, just save the result in dstshs */
 	dstshs = (cpkl_shs_t *)cpkl_bst_lkup(sh->slbtroot, &(lkupshs.spbst), cpkl_shslbcmp);
 	/* we can't find in AVL, the block is not alloced from this sh */
@@ -2366,7 +2366,7 @@ u32 cpkl_shgetblkidx(cpkl_sh_t *sh, void *blk)
 	dstshs = CPKL_GETCONTAINER(dstshs, cpkl_shs_t, spbst);
 	retidx = dstshs->shs_idx * sh->bps;
 
-	retidx += (u32)(((sz_t)blk - (sz_t)(dstshs->rgl) - sizeof(cpkl_shs_t)) / sh->s_blk);
+	retidx += (u32)((CPKL_P2V(blk) - CPKL_P2V(dstshs->rgl) - sizeof(cpkl_shs_t)) / sh->s_blk);
 
 	return retidx;
 }
@@ -2402,7 +2402,7 @@ void *cpkl_shgetblkbyidx(cpkl_sh_t *sh, u32 idx)
 cpkl_shgetblkbyidx_getblk:
 
 	/* now locate this block */
-	ret = (void *)(((sz_t)p->rgl) + sizeof(cpkl_shs_t) + (idx % sh->bps) * sh->s_blk);
+	ret = CPKL_V2P(CPKL_P2V(p->rgl) + sizeof(cpkl_shs_t) + (idx % sh->bps) * sh->s_blk);
 #if 1
 	/* this block pointer should NOT in free list */
 	fp = p->freepos;
@@ -2662,7 +2662,7 @@ void *cpkl_ssalloc(cpkl_ss_t *ss)
 
 	vs			= CPKL_GETCONTAINER(ss->freeslb, cpkl_sss_t, curslb);
 	ret			= vs->freepos;
-	vs->freepos	= (void *)((sz_t)(vs->freepos) + ss->s_blk);
+	vs->freepos	= CPKL_V2P(CPKL_P2V(vs->freepos) + ss->s_blk);
     (vs->n_blk)++;
 	(ss->n_blk)++;
 
@@ -2682,7 +2682,7 @@ void *cpkl_ssalloc(cpkl_ss_t *ss)
 				/* roll back this alloc if hsp_ssns() faild */
 				ss->freeslb	= ss->freeslb->prev;
 				vs			= CPKL_GETCONTAINER(ss->freeslb, cpkl_sss_t, curslb);
-                vs->freepos	= (void *)((sz_t)(vs->freepos) - ss->s_blk);
+                vs->freepos	= CPKL_V2P(CPKL_P2V(vs->freepos) - ss->s_blk);
 				(vs->n_blk)--;
                 (ss->n_blk)--;
 
@@ -2740,7 +2740,7 @@ void cpkl_ssfree(cpkl_ss_t *ss, u32 n_blk)
 		else
 			curfreecount = n_blk;
 
-		vs->freepos = (void *)((sz_t)(vs->freepos) - curfreecount * ss->s_blk);
+		vs->freepos = CPKL_V2P(CPKL_P2V(vs->freepos) - curfreecount * ss->s_blk);
 		vs->n_blk -= curfreecount;
         ss->n_blk -= curfreecount;
 
@@ -3012,7 +3012,7 @@ void cpkl_hltest(void)
 		cpkl_hlnd_t *lkup = cpkl_hllkup(tmp, cmpbuff[i].key, NULL);
 		cpkl_tms(1, CPKL_TMS_OFF);
 		CPKL_ASSERT(cpkl_pdf_memcmp(lkup->keyrst, cmpbuff[i].key, CPKL_HSTEST_KEYLEN) == 0);
-		CPKL_ASSERT(cpkl_pdf_memcmp((void *)((sz_t)(lkup->keyrst) + CPKL_HSTEST_KEYLEN), cmpbuff[i].rst, CPKL_HSTEST_RSTLEN) == 0);
+		CPKL_ASSERT(cpkl_pdf_memcmp(CPKL_V2P(CPKL_P2V(lkup->keyrst) + CPKL_HSTEST_KEYLEN), cmpbuff[i].rst, CPKL_HSTEST_RSTLEN) == 0);
 	}
 
 	for (i = 0; i < CPKL_HSTEST_TESTTIMES; i++)
@@ -3871,7 +3871,7 @@ static void * cpkl_tppubent(void *param)
 static int cpkl_tppubent(void *param)
 #endif
 {
-	u32 tidx = (u32)(sz_t)param;
+	u32 tidx = (u32)CPKL_P2V(param);
 	CPKL_ASSERT(tidx < unique_tp.n_tpslot);
 	cpkl_tpslot_t *tpslot = &(unique_tp.tpslotlist[tidx]);
 #ifdef CPKL_CONFIG_DEBUG
@@ -3951,7 +3951,7 @@ int cpkl_tpstart(u32 n_thread)
 		/* no need to maintain the handle, just close it */
 		CloseHandle(htmp);
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_UMOD
-		pthread_create(&(unique_tp.thdesc[i]), NULL, cpkl_tppubent, (void *)(sz_t)i);
+		pthread_create(&(unique_tp.thdesc[i]), NULL, cpkl_tppubent, CPKL_V2P(i));
 #elif CPKL_CONFIG_PLATFORM == CPKL_CONFIG_PLATFORM_LINUX_KMOD
 		unique_tp.thdesc[i] = kthread_create(cpkl_tppubent, (void *)(unsigned long)i, "cpkl_threadpool-%d", i);
 		cgroup_kernel_attach_path("./", unique_tp.thdesc[i]);
