@@ -24,9 +24,6 @@
 /* random infrastructure switch, kernel mode has not support this */
 #define CPKL_CONFIG_RI
 
-/* range resource manager, todo : need to program completely */
-// #define CPKL_CONFIG_RRMGNR
-
 /* redirection the printing */
 // #define CPKL_CONFIG_COSTUM_RPINTF
 
@@ -85,9 +82,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #pragma comment (lib, "Winmm.lib")
-#pragma comment(lib, "ws2_32.lib")
+#pragma comment (lib, "ws2_32.lib")
 
 #define cpkl_pdf_malloc			malloc
 #define cpkl_pdf_free			free
@@ -112,6 +110,8 @@
 #define cpkl_pdf_fread			fread
 #define cpkl_pdf_fprintf		fprintf
 
+#define cpkl_pdf_time			time
+#define cpkl_pdf_localtime		localtime
 #define cpkl_pdf_usleep(n)		Sleep((n) / 1000)
 
 #define CPKL_PATHDASH			"\\"
@@ -157,6 +157,8 @@
 #define cpkl_pdf_fread			fread
 #define cpkl_pdf_fprintf		fprintf
 
+#define cpkl_pdf_time			time
+#define cpkl_pdf_localtime		localtime
 #define cpkl_pdf_usleep			usleep
 
 #define CPKL_PATHDASH			"/"
@@ -219,11 +221,19 @@ typedef double					f64;
 #define CPKL_V2P(v)				((void *)((char *)0 + (v)))
 
 #define CPKL_ARRAY_SIZE(ar)		(sizeof(ar) / sizeof((ar)[0]))
+#define CPKL_FIELD_SIZE(type, field)	\
+	(sizeof(((type *)(0))->field))
 
 #define CPKL_ALIGN(l, align)	((((l) + (align) - 1) / (align)) * (align))
 #define CPKL_FIELDLEN(s, f)		(sizeof(((s *)(0))->f))
 /* some special value which CPKL used */
 #define	CPKL_INVALID_IDX		((u32)(-1))
+
+static inline char cpkl_hex2num(char c)
+{
+	return ((c >= '0') && (c <= '9')) ? (c - '0') :
+			(((c >= 'A') && (c <= 'F')) ? (c - 'A' + 10) : (c - 'a' + 10));
+}
 
 #ifdef CPKL_CONFIG_DEBUG
 #define CPKL_ASSERT(cond)												\
@@ -361,6 +371,19 @@ static inline void cpkl_initlisthead(cpkl_listhead_t *head)
 	head->next = head->prev = head;
 }
 
+static inline cpkl_listhead_t *cpkl_listprev(cpkl_listhead_t *p, cpkl_listhead_t *head)
+{
+	p = p->prev;
+
+	return p != head ? p : NULL;
+}
+
+static inline cpkl_listhead_t *cpkl_listnext(cpkl_listhead_t *p, cpkl_listhead_t *head)
+{
+	p = p->next;
+
+	return p != head ? p : NULL;
+}
 static inline void cpkl_listadd_(cpkl_listhead_t *p, cpkl_listhead_t *prev, cpkl_listhead_t *next)
 {
 	prev->next = p;
@@ -983,40 +1006,39 @@ CODE_SECTION("RangeResouce Mngr")
 CODE_SECTION("====================")
 
 typedef struct _cpkl_rrnd {
-	cpkl_bstn_t	bstn;
-	u64			begin, sz;
+	cpkl_listhead_t	ln;
+	cpkl_bstn_t		bstn;
+	u64				begin, sz;
+	u32				type;
 } cpkl_rrnd_t;
 
-typedef struct _cpkl_rrmgnr {
-	cpkl_bstn_t	*root;
-	cpkl_sh_t	*ndsh;			/* mngr all the cpkl_rrnd_t */
-	u64			begin, total;
-	u64			left;			/* total left, init to total */
-} cpkl_rrmgnr_t;
+typedef int (*cpkl_rrwalk_func)(cpkl_rrnd_t *rrnd, void *param);
 
-typedef struct _cpkl_rrmgnrfcp {
-	u64			begin, total;
-} cpkl_rrmgnrfcp_t;
+typedef struct _cpkl_rrmngr {
+	cpkl_listhead_t	lh;
+	cpkl_bstn_t		*root;			/* bst root */
+	cpkl_sh_t		*ndsh;			/* mngr all the cpkl_rrnd_t */
+	u64				begin, total;
+	u32				shnf;			/* ndsh need free */
+} cpkl_rrmngr_t;
 
-CPKL_FCTNEW_DEFINE(cpkl_rrmgnr_t);
-CPKL_FCTDEL_DEFINE(cpkl_rrmgnr_t);
+typedef struct _cpkl_rrmngrfcp {
+	u64				begin, total;
+	u32				inittype;
+	cpkl_sh_t		*ndsh;
+} cpkl_rrmngrfcp_t;
 
-#ifdef CPKL_CONFIG_RRMGNR
-int cpkl_rroccupy(cpkl_rrmgnr_t *rrmgnr, u64 begin, u64 size);
-int cpkl_rralloc(cpkl_rrmgnr_t *rrmgnr, u64 *begin, u64 size);
-int cpkl_rrfree(cpkl_rrmgnr_t *rrmgnr, u64 begin, u64 size);
+CPKL_FCTNEW_DEFINE(cpkl_rrmngr_t);
+CPKL_FCTDEL_DEFINE(cpkl_rrmngr_t);
+
+int cpkl_rrlookup(cpkl_rrmngr_t *rrmngr, u64 begin, u64 size, u32 *type);
+int cpkl_rrset(cpkl_rrmngr_t *rrmngr, u64 begin, u64 size, u32 type);
+int cpkl_rrwalk(cpkl_rrmngr_t *rrmngr, cpkl_rrwalk_func walk, void *param);
 
 #ifdef CPKL_CONFIG_DEBUG
-void cpkl_rrmgnrtest(void);
+void cpkl_rrmngrtest(void);
 #else
-#define	cpkl_rrmgnrtest()
-#endif
-/*
-#else
-static int cpkl_rroccupy(cpkl_rrmgnr_t *rrmgnr, u64 begin, u64 size){return -1;}
-static int cpkl_rralloc(cpkl_rrmgnr_t *rrmgnr, u64 *begin, u64 size){return -1;}
-static int cpkl_rrfree(cpkl_rrmgnr_t *rrmgnr, u64 begin, u64 size){return -1;}
-*/
+static inline void cpkl_rrmngrtest(void) {}
 #endif
 
 CODE_SECTION("====================")

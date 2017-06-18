@@ -638,7 +638,7 @@ CODE_SECTION("====================")
 #ifdef CPKL_CONFIG_RI
 void cpkl_ri_seed(void)
 {
-	cpkl_pdf_srand((int)cpkl_tmsstamp());
+	cpkl_pdf_srand((int)cpkl_pdf_time(NULL));
 }
 
 u32 cpkl_ri_rand(u32 begin, u32 count)
@@ -3037,12 +3037,10 @@ CODE_SECTION("====================")
 CODE_SECTION("RangeResouce Mngr")
 CODE_SECTION("====================")
 
-#ifdef CPKL_CONFIG_RRMGNR
-
 static int cpkl_rrndcmp(cpkl_bstn_t *n1, cpkl_bstn_t *n2)
 {
 	cpkl_rrnd_t	*p1 = CPKL_GETCONTAINER(n1, cpkl_rrnd_t, bstn);
-	cpkl_rrnd_t	*p2 = CPKL_GETCONTAINER(n1, cpkl_rrnd_t, bstn);
+	cpkl_rrnd_t	*p2 = CPKL_GETCONTAINER(n2, cpkl_rrnd_t, bstn);
 	u64 begin1 = p1->begin, begin2 = p2->begin;
 	u64 end1 = begin1 + p1->sz, end2 = begin2 + p2->sz;
 
@@ -3060,14 +3058,14 @@ static int cpkl_rrndcmp(cpkl_bstn_t *n1, cpkl_bstn_t *n2)
 	return CPKL_BSTCMP_OVLP;
 }
 
-CPKL_FCTNEW_DEFINE(cpkl_rrmgnr_t)
+CPKL_FCTNEW_DEFINE(cpkl_rrmngr_t)
 {
 	if (param == NULL)
 		return NULL;
 
-	cpkl_rrmgnrfcp_t *fcp = (cpkl_rrmgnrfcp_t *)param;
+	cpkl_rrmngrfcp_t *fcp = (cpkl_rrmngrfcp_t *)param;
 
-	cpkl_rrmgnr_t *newrrmngr = (cpkl_rrmgnr_t *)cpkl_malloc(sizeof(cpkl_rrmgnr_t));
+	cpkl_rrmngr_t *newrrmngr = (cpkl_rrmngr_t *)cpkl_malloc(sizeof(cpkl_rrmngr_t));
 	if (newrrmngr == NULL)
 		return NULL;
 
@@ -3075,150 +3073,260 @@ CPKL_FCTNEW_DEFINE(cpkl_rrmgnr_t)
 
 	/* input parameters */
 	newrrmngr->begin = fcp->begin;
-	newrrmngr->total = newrrmngr->left = fcp->total;
+	newrrmngr->total = fcp->total;
 
 	/* default parameters */
+	cpkl_initlisthead(&(newrrmngr->lh));
 	newrrmngr->root = NULL;
-{
-	cpkl_shfcp_t fcp = {sizeof(cpkl_rrnd_t), 1024 * 1024, 0};
-	newrrmngr->ndsh = CPKL_FCTNEW(cpkl_sh_t, &fcp);
-	if (newrrmngr->ndsh == NULL)
+	if (fcp->ndsh)
 	{
-		CPKL_FCTNEW(cpkl_rrmgnr_t, newrrmngr);
-		return NULL;
+		newrrmngr->ndsh = fcp->ndsh;
 	}
-}
+	else
+	{
+		cpkl_shfcp_t fcp = {sizeof(cpkl_rrnd_t), 1 * 1024, 0};
+		newrrmngr->ndsh = CPKL_FCTNEW(cpkl_sh_t, &fcp);
+		if (newrrmngr->ndsh == NULL)
+		{
+			goto _err;
+		}
+		newrrmngr->shnf = 1;
+	}
 
 	/* insert the root cpkl_rrnd_t which cover the whole range */
 	cpkl_rrnd_t *whole = (cpkl_rrnd_t *)cpkl_shalloc(newrrmngr->ndsh);
 	if (whole == NULL)
 	{
-		CPKL_FCTNEW(cpkl_rrmgnr_t, newrrmngr);
-		return NULL;
+		goto _err;
 	}
 	whole->begin = newrrmngr->begin;
 	whole->sz = newrrmngr->total;
+	whole->type = fcp->inittype;
+	cpkl_listadd(&(whole->ln), &(newrrmngr->lh));
 	cpkl_bst_insert(&(newrrmngr->root), &(whole->bstn), cpkl_rrndcmp);
 
 	return newrrmngr;
+
+_err:
+	CPKL_FCTDEL(cpkl_rrmngr_t, newrrmngr);
+	return NULL;
 }
 
-CPKL_FCTDEL_DEFINE(cpkl_rrmgnr_t)
+CPKL_FCTDEL_DEFINE(cpkl_rrmngr_t)
 {
 	if (obj == NULL)
 		return;
 
-	cpkl_rrmgnr_t *rrmngr = (cpkl_rrmgnr_t *)obj;
+	cpkl_rrmngr_t *rrmngr = (cpkl_rrmngr_t *)obj;
 
-	if (rrmngr->ndsh)
+	if (rrmngr->shnf)
 		CPKL_FCTDEL(cpkl_sh_t, rrmngr->ndsh);
 
 	cpkl_free(rrmngr);
 }
 
-/*
- * just occupy a designated range resouce
- * rrmgnr:
- * begin : range begin need to occupy
- * size  : range size
- */
-int cpkl_rroccupy(cpkl_rrmgnr_t *rrmgnr, u64 begin, u64 size)
+int cpkl_rrlookup(cpkl_rrmngr_t *rrmngr, u64 begin, u64 size, u32 *type)
 {
-	cpkl_rrnd_t *p, *newrrnd, lkupnd;
+	cpkl_rrnd_t *p, lkupnd;
+
 	lkupnd.begin = begin;
 	lkupnd.sz = size;
-	/* lookup this range in the rrmgnr */
-	cpkl_bstn_t *res = cpkl_bst_lkup(rrmgnr->root, &(lkupnd.bstn), cpkl_rrndcmp);
+	/* lookup this range in the BST */
+	cpkl_bstn_t *res = cpkl_bst_lkup(rrmngr->root, &(lkupnd.bstn), cpkl_rrndcmp);
 	if (res == NULL)
 		return -1;
 
 	p = CPKL_GETCONTAINER(res, cpkl_rrnd_t, bstn);
-	u64 oldend = p->begin + p->sz;
-
-	if (begin > p->begin)
-	{
-		/*
-		 * modify the exist range
-		 * we have to do this before the new rrblock insert
-		 * or the BST can't inset that rrblock successful
-		 */
-		p->sz = begin - p->begin;
-
-		if ((begin + size) < oldend)
-		{
-			/* we need to insert new rrblock */
-			newrrnd = (cpkl_rrnd_t *)cpkl_shalloc(rrmgnr->ndsh);
-			if (newrrnd == NULL)
-			{
-				/* we have to rollback */
-				p->sz = oldend - p->begin;
-
-				return -2;
-			}
-
-			newrrnd->begin = begin + size;
-			newrrnd->sz = oldend - newrrnd->begin;
-
-			CPKL_ASSERT(cpkl_bst_insert(&(rrmgnr->root),
-						&(newrrnd->bstn), cpkl_rrndcmp) == 0);
-		}
-	}
-	else
-	{
-		if ((begin + size) < oldend)
-		{
-			/* modify the exist range */
-			p->begin = begin;
-		}
-		else
-		{
-			/* new range occupy the whole exist rrblock, just remove it */
-			cpkl_bst_remove(&(rrmgnr->root), &(p->bstn));
-
-			/* release this rrblock */
-			cpkl_shfree(rrmgnr->ndsh, p);
-		}
-	}
-
-	/* modify the 'left' size */
-	rrmgnr->left -= size;
+	if (type)
+		*type = p->type;
 
 	return 0;
 }
 
-static int cpkl_(cpkl_bstn_t *n1, void *param)
-{
-
-}
-
 /*
- * size  : designated size
- * begin : output param
+ * set range's type
+ * rrmgnr:
+ * begin : range begin need to occupy
+ * size  : range size
+ * type  :
  */
-int cpkl_rralloc(cpkl_rrmgnr_t *rrmgnr, u64 *begin, u64 size)
+int cpkl_rrset(cpkl_rrmngr_t *rrmngr, u64 begin, u64 size, u32 type)
 {
-	/* search the suitable rrblock which fit the size */
-	cpkl_bst_walk(rrmgnr->root, CPKL_BSTWALKTYPE_LMR, cpkl_bstwkop op, void * param);
+	u64 oldbegin, oldsz;
+	u32	oldtype;
+	cpkl_listhead_t *lnd;
+	cpkl_rrnd_t *newrrnd, *p, *prev, *next, lkupnd;
+	lkupnd.begin = begin;
+	lkupnd.sz = size;
+	/* lookup this range in the BST */
+	cpkl_bstn_t *res = cpkl_bst_lkup(rrmngr->root, &(lkupnd.bstn), cpkl_rrndcmp);
+	if (res == NULL)
+		return -1;
+
+	p = CPKL_GETCONTAINER(res, cpkl_rrnd_t, bstn);
+	if (p->type == type)
+		return -2;
+
+	oldbegin = p->begin;
+	oldsz = p->sz;
+	oldtype = p->type;
+
+	/* modify this rrnd */
+	p->begin = begin;
+	p->sz = size;
+	p->type = type;
+
+	if (oldbegin != begin)
+	{
+		/*  */
+		newrrnd = (cpkl_rrnd_t *)cpkl_shalloc(rrmngr->ndsh);
+		if (newrrnd == NULL)
+			CPKL_ASSERT(0);
+
+		newrrnd->begin = oldbegin;
+		newrrnd->sz = begin - oldbegin;
+		newrrnd->type = oldtype;
+		cpkl_listadd_(&(newrrnd->ln), p->ln.prev, &(p->ln));
+		prev = newrrnd;
+
+		cpkl_bst_insert(&(rrmngr->root), &(newrrnd->bstn), cpkl_rrndcmp);
+	}
+	else
+	{
+		lnd = cpkl_listprev(&(p->ln), &(rrmngr->lh));
+		if (lnd)
+			prev = CPKL_GETCONTAINER(lnd, cpkl_rrnd_t, ln);
+		else
+			prev = NULL;
+	}
+
+	if ((oldbegin + oldsz) != (begin + size))
+	{
+		/*  */
+		newrrnd = (cpkl_rrnd_t *)cpkl_shalloc(rrmngr->ndsh);
+		if (newrrnd == NULL)
+			CPKL_ASSERT(0);
+
+		newrrnd->begin = begin + size;
+		newrrnd->sz = (oldbegin + oldsz) - (begin + size);
+		newrrnd->type = oldtype;
+		cpkl_listadd_(&(newrrnd->ln), &(p->ln), p->ln.next);
+		next = newrrnd;
+
+		cpkl_bst_insert(&(rrmngr->root), &(newrrnd->bstn), cpkl_rrndcmp);
+	}
+	else
+	{
+		lnd = cpkl_listnext(&(p->ln), &(rrmngr->lh));
+		if (lnd)
+			next = CPKL_GETCONTAINER(lnd, cpkl_rrnd_t, ln);
+		else
+			next = NULL;
+	}
+
+	/* combine if needed */
+	if (prev && (prev->type == p->type))
+	{
+		cpkl_listdel(&(prev->ln));
+		cpkl_bst_remove(&(rrmngr->root), &(prev->bstn));
+
+		p->begin = prev->begin;
+		p->sz += prev->sz;
+
+		cpkl_shfree(rrmngr->ndsh, prev);
+	}
+
+	if (next && (next->type == p->type))
+	{
+		cpkl_listdel(&(next->ln));
+		cpkl_bst_remove(&(rrmngr->root), &(next->bstn));
+
+		p->sz += next->sz;
+
+		cpkl_shfree(rrmngr->ndsh, next);
+	}
+
+	return 0;
 }
 
-int cpkl_rrfree(cpkl_rrmgnr_t *rrmgnr, u64 begin, u64 size)
+int cpkl_rrwalk(cpkl_rrmngr_t *rrmngr, cpkl_rrwalk_func walk, void *param)
 {
+	cpkl_rrnd_t *p;
+	int ret;
+	u32 n = 0;
 
+	CPKL_LISTENTRYWALK(p, cpkl_rrnd_t, &(rrmngr->lh), ln)
+	{
+		ret = walk(p, param);
+		if (ret)
+			return ret;
+
+		n++;
+	}
+	CPKL_ASSERT(n == rrmngr->ndsh->n_cb);
+
+	return 0;
 }
 
-#else
+#ifdef CPKL_CONFIG_DEBUG
 
-CPKL_FCTNEW_DEFINE(cpkl_rrmgnr_t)
+static int cpkl_rrmngrtest_walk(cpkl_rrnd_t *rrnd, void *param)
 {
-	return NULL;
+	cpkl_printf("[%03lld ~ %03lld), type(%d)\n",
+		rrnd->begin,
+		rrnd->begin + rrnd->sz,
+		rrnd->type);
+
+	return 0;
 }
 
-CPKL_FCTDEL_DEFINE(cpkl_rrmgnr_t)
+void cpkl_rrmngrtest(void)
 {
+	cpkl_rrmngrfcp_t fcp = {0, 16, 0};
+	cpkl_rrmngr_t *mngr = CPKL_FCTNEW(cpkl_rrmngr_t, &fcp);
 
+	CPKL_ASSERT(cpkl_rrset(mngr, 0, 17, 1));
+	CPKL_ASSERT(cpkl_rrset(mngr, 15, 2, 1));
+	CPKL_ASSERT(cpkl_rrset(mngr, 17, 2, 1));
+
+	cpkl_rrset(mngr, 0, 1, 1);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	cpkl_rrset(mngr, 0, 1, 0);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+
+	cpkl_rrset(mngr, 15, 1, 2);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	CPKL_ASSERT(cpkl_rrset(mngr, 15, 1, 2));
+	cpkl_rrset(mngr, 15, 1, 0);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+
+	cpkl_rrset(mngr, 8, 2, 2);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	cpkl_rrset(mngr, 8, 2, 0);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+
+
+	cpkl_rrset(mngr, 8, 2, 3);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	CPKL_ASSERT(cpkl_rrset(mngr, 9, 2, 3));
+	cpkl_rrset(mngr, 10, 1, 3);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	cpkl_rrset(mngr, 12, 2, 4);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	cpkl_rrset(mngr, 11, 1, 3);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	cpkl_rrset(mngr, 12, 2, 3);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	cpkl_rrset(mngr, 10, 3, 0);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+	cpkl_rrset(mngr, 13, 1, 0);
+	cpkl_rrwalk(mngr, cpkl_rrmngrtest_walk, NULL);
+
+	CPKL_FCTDEL(cpkl_rrmngr_t, mngr);
 }
 
 #endif
+
 
 CODE_SECTION("====================")
 CODE_SECTION("Custom File Operation")
